@@ -4,10 +4,11 @@ import {
   useImperativeHandle,
   useRef,
 } from "react";
-import type {
-  LoadingPhase,
-  ViewerCommand,
-  ViewerHandle,
+import {
+  AppError,
+  type LoadingPhase,
+  type ViewerCommand,
+  type ViewerHandle,
 } from "../types/drawing";
 import { DrawingViewer } from "../viewer/DrawingViewer";
 
@@ -26,12 +27,22 @@ export const DrawingCanvas = forwardRef<ViewerHandle, Props>(
   function DrawingCanvas({ file, onProgress, onReady, onError }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const viewerRef = useRef<DrawingViewer | null>(null);
+    const callbacksRef = useRef({ onProgress, onReady, onError });
+    callbacksRef.current = { onProgress, onReady, onError };
 
     useImperativeHandle(
       ref,
       () => ({
         execute(command: ViewerCommand) {
-          viewerRef.current?.execute(command);
+          try {
+            viewerRef.current?.execute(command);
+          } catch (error) {
+            callbacksRef.current.onError(
+              error instanceof AppError
+                ? error
+                : new AppError("RENDER_FAILED", undefined, { cause: error }),
+            );
+          }
         },
       }),
       [],
@@ -43,19 +54,33 @@ export const DrawingCanvas = forwardRef<ViewerHandle, Props>(
       }
 
       let active = true;
-      const viewer = new DrawingViewer(containerRef.current);
+      let viewer: DrawingViewer;
+      try {
+        viewer = new DrawingViewer(containerRef.current, (error) => {
+          if (active) {
+            callbacksRef.current.onError(error);
+          }
+        });
+      } catch (error) {
+        callbacksRef.current.onError(error);
+        return;
+      }
       viewerRef.current = viewer;
 
       viewer
-        .load(file, onProgress)
+        .load(file, (phase, processed, total) => {
+          if (active) {
+            callbacksRef.current.onProgress(phase, processed, total);
+          }
+        })
         .then(() => {
           if (active) {
-            onReady();
+            callbacksRef.current.onReady();
           }
         })
         .catch((error: unknown) => {
           if (active) {
-            onError(error);
+            callbacksRef.current.onError(error);
           }
         });
 
@@ -64,7 +89,7 @@ export const DrawingCanvas = forwardRef<ViewerHandle, Props>(
         viewerRef.current = null;
         viewer.destroy();
       };
-    }, [file, onError, onProgress, onReady]);
+    }, [file]);
 
     return <div ref={containerRef} className="drawing-canvas" />;
   },

@@ -1,5 +1,21 @@
 apply plugin: 'com.android.application'
 
+// Override this for the next unused code in Play Console without changing source.
+def releaseVersionCode = providers.gradleProperty('IZCAD_VERSION_CODE').orElse('4').get()
+if (!(releaseVersionCode ==~ /[1-9][0-9]*/) || releaseVersionCode.toLong() <= 3 || releaseVersionCode.toLong() > 2100000000) {
+    throw new GradleException('IZCAD_VERSION_CODE must be an integer from 4 to 2100000000, greater than every code already uploaded to Play Console.')
+}
+
+// Never commit credentials. Android Studio can also sign the unsigned release bundle.
+def signingNames = ['IZCAD_KEYSTORE_FILE', 'IZCAD_KEYSTORE_PASSWORD', 'IZCAD_KEY_ALIAS', 'IZCAD_KEY_PASSWORD']
+def signingValues = signingNames.collectEntries { name ->
+    [(name): providers.environmentVariable(name).orElse(providers.gradleProperty(name)).orNull]
+}
+def signingSupplied = signingValues.values().any { it != null && !it.isEmpty() }
+if (signingSupplied && !signingValues.values().every { it != null && !it.isEmpty() }) {
+    throw new GradleException('Release signing requires all four IZCAD signing settings. Credentials are intentionally omitted from this message.')
+}
+
 android {
     namespace = "com.izcad.viewer"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -7,8 +23,8 @@ android {
         applicationId "com.izcad.viewer"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 3
-        versionName "1.2"
+        versionCode releaseVersionCode.toInteger()
+        versionName "2.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,8 +32,22 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        if (signingSupplied) {
+            release {
+                storeFile file(signingValues.IZCAD_KEYSTORE_FILE)
+                storePassword signingValues.IZCAD_KEYSTORE_PASSWORD
+                keyAlias signingValues.IZCAD_KEY_ALIAS
+                keyPassword signingValues.IZCAD_KEY_PASSWORD
+            }
+        }
+    }
     buildTypes {
         release {
+            debuggable false
+            if (signingSupplied) {
+                signingConfig signingConfigs.release
+            }
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }

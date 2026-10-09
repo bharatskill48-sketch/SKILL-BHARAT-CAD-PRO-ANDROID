@@ -18,6 +18,8 @@
 
 ## Türkçe
 
+Güncel sürüm: **2.0**. Değişiklikler [CHANGELOG.md](CHANGELOG.md), güncelleme ve imzalama adımları [PLAY_RELEASE_2.0.md](PLAY_RELEASE_2.0.md) dosyasındadır.
+
 izCAD, Android cihazlarda DXF ve DWG çizimlerini tamamen çevrimdışı açmak ve
 görüntülemek için geliştirilmiş açık kaynak bir CAD görüntüleyicidir. Uygulama
 çizimleri düzenlemez, değiştirmez veya bir sunucuya göndermez.
@@ -27,6 +29,9 @@ görüntülemek için geliştirilmiş açık kaynak bir CAD görüntüleyicidir.
 - DXF ve DWG dosyalarını cihazdan seçme
 - Açılan çizimleri uygulamaya özel çevrimdışı Çizim Kitaplığı'nda saklama
 - Kitaplıkta klasör oluşturma, yeniden adlandırma, kopyalama, taşıma ve silme
+- Kitaplıkta klasör içinde arama, ad/tarih/boyut sıralaması ve toplu dosya ekleme
+- Aynı adlı dosyaları mevcut çizimi değiştirmeden ayrı saklama
+- Android geri tuşu, hata sonrası tekrar deneme ve kontrollü iptal
 - DWG dosyalarını cihaz üzerinde LibreDWG WebAssembly ile DXF'e dönüştürme
 - Çevrimdışı çalışma; Android `INTERNET` izni yok
 - Pan ve iki parmakla yakınlaştırma
@@ -134,6 +139,8 @@ olduğunuz küçük bir dosya kullanın.
 
 ## English
 
+Current version: **2.0**. See [CHANGELOG.md](CHANGELOG.md) and [PLAY_RELEASE_2.0.md](PLAY_RELEASE_2.0.md) for changes and the Android update/signing workflow.
+
 izCAD is an open-source Android viewer designed to open and display DXF and
 DWG drawings entirely offline. It does not edit drawings, modify files, or
 upload them to a server.
@@ -143,6 +150,9 @@ upload them to a server.
 - Select DXF and DWG files from the device
 - Keep opened drawings in the app-private offline Drawing Library
 - Create folders and rename, copy, move, or delete library items
+- Search the current folder, sort by name/date/size, and import multiple drawings
+- Keep same-named drawings separately without replacing an existing file
+- Android back navigation, retry and cancellation
 - Convert DWG to DXF locally with LibreDWG WebAssembly
 - Fully offline operation with no Android `INTERNET` permission
 - Pan and pinch-to-zoom

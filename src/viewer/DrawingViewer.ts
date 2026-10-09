@@ -1,19 +1,31 @@
 import { DxfViewer } from "dxf-viewer";
 import { Color, Vector3 } from "three";
-import type { LoadingPhase, ViewerCommand } from "../types/drawing";
+import {
+  AppError,
+  type LoadingPhase,
+  type ViewerCommand,
+} from "../types/drawing";
+import { detectDxfEncoding } from "./dxfEncoding";
+import { validateDrawingFileSize } from "../files/fileTypes";
 import {
   getSavedDrawingView,
   resolveSavedDrawingView,
   type SavedDrawingView,
 } from "./savedView";
 import { installXclipRendering } from "./xclipRendering";
+import {
+  DEFAULT_VIEWER_OVERLAY_RESERVE,
+  fitPaddingForViewport,
+} from "./viewerLayout";
 
 installXclipRendering(DxfViewer);
 
-const DRAWING_FONT_URL = new URL(
-  "fonts/IzCadSans-Regular.ttf",
-  document.baseURI,
-).href;
+const LOAD_TIMEOUT_MS = 3 * 60 * 1000;
+const HEADER_BYTES = 64 * 1024;
+
+function abortError(): DOMException {
+  return new DOMException("Drawing loading was cancelled.", "AbortError");
+}
 
 type ProgressCallback = (
   phase: LoadingPhase,
@@ -25,8 +37,33 @@ export class DrawingViewer {
   private readonly viewer: DxfViewer;
   private objectUrl: string | null = null;
   private savedView: SavedDrawingView | null = null;
+  private worker: Worker | null = null;
+  private cancelLoad: ((reason: unknown) => void) | null = null;
+  private loadId = 0;
+  private destroyed = false;
+  private ready = false;
+  private initialFitFrame: number | null = null;
+  private readonly onContextLost = (event: Event): void => {
+    event.preventDefault();
+    if (this.destroyed) {
+      return;
+    }
+    this.ready = false;
+    const error = new AppError(
+      "RENDER_FAILED",
+      "The drawing's WebGL context was lost.",
+    );
+    if (this.cancelLoad) {
+      this.cancelLoad(error);
+    } else {
+      this.onError?.(error);
+    }
+  };
 
-  constructor(container: HTMLElement) {
+  constructor(
+    container: HTMLElement,
+    private readonly onError?: (error: unknown) => void,
+  ) {
     this.viewer = new DxfViewer(container, {
       autoResize: true,
       clearColor: new Color("#0b1118"),
@@ -38,30 +75,132 @@ export class DrawingViewer {
       retainParsedDxf: false,
       preserveDrawingBuffer: false,
     });
+    // dxf-viewer returns a partially initialized instance when WebGL creation
+    // fails instead of throwing. Detect it before requesting any canvas methods.
+    if (!this.viewer.HasRenderer()) {
+      throw new AppError("RENDER_FAILED", "WebGL could not be initialized.");
+    }
+    this.viewer.GetCanvas().addEventListener(
+      "webglcontextlost",
+      this.onContextLost,
+    );
   }
 
   async load(file: File, onProgress: ProgressCallback): Promise<void> {
+    if (this.destroyed) {
+      throw abortError();
+    }
+    validateDrawingFileSize(file.size);
+    this.cancelLoad?.(abortError());
+    this.cancelInitialFit();
+    const loadId = ++this.loadId;
+    this.ready = false;
+    this.releaseWorker();
     this.releaseObjectUrl();
     this.savedView = getSavedDrawingView(file);
-    this.objectUrl = URL.createObjectURL(file);
-
-    await this.viewer.Load({
-      url: this.objectUrl,
-      fonts: [DRAWING_FONT_URL],
-      progressCbk: (phase, processed, total) => {
-        onProgress(phase, processed, total);
-      },
-      workerFactory: () =>
-        new Worker(new URL("../workers/drawing.worker.ts", import.meta.url), {
-          type: "module",
-          name: "izcad-dxf-worker",
-      }),
+    const interrupted = new Promise<never>((_resolve, reject) => {
+      this.cancelLoad = reject;
     });
+    const timeout = window.setTimeout(() => {
+      if (loadId === this.loadId) {
+        this.cancelLoad?.(new AppError("DXF_OPEN_FAILED", "Drawing loading timed out."));
+      }
+    }, LOAD_TIMEOUT_MS);
 
-    this.applySavedView();
+    try {
+      const prefix = await Promise.race([
+        file.slice(0, HEADER_BYTES).arrayBuffer(),
+        interrupted,
+      ]);
+      if (this.destroyed || loadId !== this.loadId) {
+        throw abortError();
+      }
+      // The pinned viewer exposes fileEncoding only in constructor options, but
+      // clones the options for every worker request. Set it before Load starts.
+      const options = (this.viewer as unknown as {
+        options: { fileEncoding: string };
+      }).options;
+      options.fileEncoding = detectDxfEncoding(new Uint8Array(prefix));
+      this.objectUrl = URL.createObjectURL(file);
+
+      await Promise.race([
+        this.viewer.Load({
+          url: this.objectUrl,
+          fonts: [new URL("fonts/IzCadSans-Regular.ttf", document.baseURI).href],
+          progressCbk: (phase, processed, total) => {
+            if (!this.destroyed && loadId === this.loadId) {
+              onProgress(phase, processed, total);
+            }
+          },
+          workerFactory: () => {
+            const worker = new Worker(
+              new URL("../workers/drawing.worker.ts", import.meta.url),
+              { type: "module", name: "izcad-dxf-worker" },
+            );
+            this.worker = worker;
+            const failed = (event: Event): void => {
+              if (!this.destroyed && loadId === this.loadId) {
+                this.cancelLoad?.(new AppError(
+                  "DXF_OPEN_FAILED",
+                  event instanceof ErrorEvent ? event.message : "The drawing worker failed.",
+                ));
+              }
+            };
+            // dxf-viewer 1.0.48 does not reliably reject requests on worker errors.
+            worker.addEventListener("error", failed);
+            worker.addEventListener("messageerror", failed);
+            return worker;
+          },
+        }),
+        interrupted,
+      ]);
+
+      if (this.destroyed || loadId !== this.loadId) {
+        throw abortError();
+      }
+      if (!this.applySavedView()) {
+        this.fit();
+        // The ready callback mounts the header and toolbar after this promise
+        // resolves. On the next frame their measured bounds include safe-area
+        // insets, so refine the initial fit once without changing a saved camera.
+        if (typeof requestAnimationFrame === "function") {
+          this.initialFitFrame = requestAnimationFrame(() => {
+            this.initialFitFrame = null;
+            if (!this.destroyed && loadId === this.loadId && this.ready) {
+              try {
+                this.fit();
+              } catch (error) {
+                this.onError?.(new AppError("RENDER_FAILED", undefined, { cause: error }));
+              }
+            }
+          });
+        }
+      }
+      this.ready = true;
+    } catch (error) {
+      if (!this.destroyed && loadId === this.loadId) {
+        try {
+          this.viewer.Clear();
+        } catch {
+          // Preserve the original load error if the failed renderer cannot clear.
+        }
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+      if (loadId === this.loadId) {
+        this.cancelLoad = null;
+        this.releaseWorker();
+        this.releaseObjectUrl();
+      }
+    }
   }
 
   execute(command: ViewerCommand): void {
+    if (this.destroyed || !this.ready) {
+      return;
+    }
+    this.cancelInitialFit();
     switch (command) {
       case "zoom-in":
         this.zoom(1.25);
@@ -81,10 +220,27 @@ export class DrawingViewer {
   }
 
   destroy(): void {
+    if (this.destroyed) {
+      return;
+    }
+    this.destroyed = true;
+    this.ready = false;
+    this.cancelInitialFit();
+    this.cancelLoad?.(abortError());
+    this.cancelLoad = null;
+    this.releaseWorker();
     this.releaseObjectUrl();
     const canvas = this.viewer.GetCanvas();
-    this.viewer.Destroy();
-    canvas.remove();
+    const renderer = this.viewer.GetRenderer();
+    canvas.removeEventListener("webglcontextlost", this.onContextLost);
+    try {
+      this.viewer.Destroy();
+    } finally {
+      // dispose() releases GPU buffers but leaves the context allocated. Android
+      // can otherwise exhaust its WebGL context budget after opening many files.
+      renderer?.forceContextLoss();
+      canvas.remove();
+    }
   }
 
   private zoom(factor: number): void {
@@ -101,17 +257,33 @@ export class DrawingViewer {
     }
 
     const origin = this.viewer.GetOrigin();
+    const canvas = this.viewer.GetCanvas();
+    const viewportHeight = canvas.clientHeight || canvas.height;
+    const viewportBounds = canvas.getBoundingClientRect?.();
+    const shell = canvas.closest?.<HTMLElement>(".viewer-shell") ?? canvas.parentElement?.parentElement;
+    const header = shell?.querySelector<HTMLElement>(".viewer-header")?.getBoundingClientRect();
+    const toolbar = shell?.querySelector<HTMLElement>(".viewer-toolbar")?.getBoundingClientRect();
+    const reserve = Math.max(
+      DEFAULT_VIEWER_OVERLAY_RESERVE,
+      header && viewportBounds ? header.bottom - viewportBounds.top + 8 : 0,
+      toolbar && viewportBounds && toolbar.width > toolbar.height
+        ? viewportBounds.bottom - toolbar.top + 8
+        : 0,
+    );
     this.viewer.FitView(
       bounds.minX - origin.x,
       bounds.maxX - origin.x,
       bounds.minY - origin.y,
       bounds.maxY - origin.y,
-      0.12,
+      fitPaddingForViewport(viewportHeight, reserve),
     );
     this.viewer.Render();
   }
 
   private applySavedView(): boolean {
+    if (!this.savedView) {
+      return false;
+    }
     const canvas = this.viewer.GetCanvas();
     const viewportAspect = canvas.width / canvas.height;
     const origin = this.viewer.GetOrigin();
@@ -137,6 +309,18 @@ export class DrawingViewer {
     if (this.objectUrl) {
       URL.revokeObjectURL(this.objectUrl);
       this.objectUrl = null;
+    }
+  }
+
+  private releaseWorker(): void {
+    this.worker?.terminate();
+    this.worker = null;
+  }
+
+  private cancelInitialFit(): void {
+    if (this.initialFitFrame !== null) {
+      cancelAnimationFrame(this.initialFitFrame);
+      this.initialFitFrame = null;
     }
   }
 }

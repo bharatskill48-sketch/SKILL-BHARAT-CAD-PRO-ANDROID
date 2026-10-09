@@ -6,7 +6,9 @@ import android.content.Intent;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Parcelable;
+import android.os.CancellationSignal;
 import android.provider.OpenableColumns;
+import androidx.activity.OnBackPressedCallback;
 import androidx.annotation.Nullable;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
@@ -14,6 +16,9 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import java.util.Locale;
+import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import org.json.JSONObject;
 
 @CapacitorPlugin(name = "IncomingDrawing")
@@ -21,7 +26,28 @@ public class IncomingDrawingPlugin extends Plugin {
 
     private final Object pendingLock = new Object();
     private JSObject pendingDrawing;
-    private long nextDrawingId = 1;
+    private final ExecutorService metadataExecutor = Executors.newSingleThreadExecutor();
+    private CancellationSignal metadataCancellation;
+    private volatile boolean destroyed;
+    private long intentGeneration;
+
+    @Override
+    public void load() {
+        getActivity().getOnBackPressedDispatcher().addCallback(
+            getActivity(),
+            new OnBackPressedCallback(true) {
+                @Override
+                public void handleOnBackPressed() {
+                    if (hasListeners("backPressed")) {
+                        notifyListeners("backPressed", new JSObject());
+                    } else {
+                        // Back remains usable while the web application starts or fails.
+                        getActivity().finish();
+                    }
+                }
+            }
+        );
+    }
 
     @Override
     protected void handleOnNewIntent(Intent intent) {
@@ -30,30 +56,51 @@ public class IncomingDrawingPlugin extends Plugin {
             return;
         }
 
-        ContentResolver resolver = getContext().getContentResolver();
-        String mimeType = intent.getType();
-        if (mimeType == null || mimeType.trim().isEmpty()) {
-            try {
-                mimeType = resolver.getType(uri);
-            } catch (RuntimeException ignored) {
-                mimeType = null;
-            }
+        if (metadataCancellation != null) {
+            metadataCancellation.cancel();
         }
-
-        DrawingMetadata metadata = readMetadata(resolver, uri);
-        String name = normalizeName(metadata.name, uri, mimeType);
-        String id;
+        final CancellationSignal cancellation = new CancellationSignal();
+        metadataCancellation = cancellation;
+        final long generation = ++intentGeneration;
         synchronized (pendingLock) {
-            id = Long.toString(nextDrawingId++);
-            pendingDrawing = new JSObject();
-            pendingDrawing.put("id", id);
-            pendingDrawing.put("uri", uri.toString());
-            pendingDrawing.put("name", name);
-            pendingDrawing.put("mimeType", mimeType == null ? "" : mimeType);
-            pendingDrawing.put("size", metadata.size);
+            pendingDrawing = null;
         }
+        final String intentMimeType = intent.getType();
+        final ContentResolver resolver = getContext().getContentResolver();
 
-        notifyListeners("drawingReceived", pendingDrawing, true);
+        // A file provider can be slow. Never query it on Android's UI thread.
+        metadataExecutor.execute(() -> {
+            if (destroyed || cancellation.isCanceled()) {
+                return;
+            }
+            String mimeType = intentMimeType;
+            if (mimeType == null || mimeType.trim().isEmpty()) {
+                try {
+                    mimeType = resolver.getType(uri);
+                } catch (RuntimeException ignored) {
+                    mimeType = null;
+                }
+            }
+            DrawingMetadata metadata = readMetadata(resolver, uri, cancellation);
+            if (destroyed || cancellation.isCanceled()) {
+                return;
+            }
+            final JSObject drawing = new JSObject();
+            drawing.put("id", UUID.randomUUID().toString());
+            drawing.put("uri", uri.toString());
+            drawing.put("name", normalizeDrawingName(metadata.name, uri.getLastPathSegment(), mimeType));
+            drawing.put("mimeType", mimeType == null ? "" : mimeType);
+            drawing.put("size", metadata.size);
+            getActivity().runOnUiThread(() -> {
+                if (destroyed || generation != intentGeneration) {
+                    return;
+                }
+                synchronized (pendingLock) {
+                    pendingDrawing = drawing;
+                }
+                notifyListeners("drawingReceived", drawing, true);
+            });
+        });
     }
 
     @PluginMethod
@@ -70,23 +117,62 @@ public class IncomingDrawingPlugin extends Plugin {
 
     @PluginMethod
     public void acknowledgeDrawing(PluginCall call) {
-        String id = call.getString("id");
-        boolean acknowledged = false;
-
-        synchronized (pendingLock) {
-            if (
-                pendingDrawing != null &&
-                id != null &&
-                id.equals(pendingDrawing.getString("id"))
-            ) {
-                pendingDrawing = null;
-                acknowledged = true;
+        final String id = call.getString("id");
+        getActivity().runOnUiThread(() -> {
+            boolean acknowledged = false;
+            synchronized (pendingLock) {
+                if (
+                    pendingDrawing != null &&
+                    id != null &&
+                    id.equals(pendingDrawing.getString("id"))
+                ) {
+                    pendingDrawing = null;
+                    acknowledged = true;
+                    // The web application has read the incoming file. Do not
+                    // reopen the launch intent after a later activity recreation.
+                    getActivity().setIntent(
+                        new Intent(getContext(), MainActivity.class).setAction(Intent.ACTION_MAIN)
+                    );
+                }
             }
-        }
+            JSObject result = new JSObject();
+            result.put("acknowledged", acknowledged);
+            call.resolve(result);
+        });
+    }
 
-        JSObject result = new JSObject();
-        result.put("acknowledged", acknowledged);
-        call.resolve(result);
+    @PluginMethod
+    public void exitApp(PluginCall call) {
+        getActivity().runOnUiThread(() -> {
+            call.resolve();
+            getActivity().finish();
+        });
+    }
+
+    @Override
+    protected void handleOnResume() {
+        JSObject state = new JSObject();
+        state.put("isActive", true);
+        notifyListeners("appStateChange", state);
+    }
+
+    @Override
+    protected void handleOnPause() {
+        JSObject state = new JSObject();
+        state.put("isActive", false);
+        notifyListeners("appStateChange", state);
+    }
+
+    @Override
+    protected void handleOnDestroy() {
+        destroyed = true;
+        if (metadataCancellation != null) {
+            metadataCancellation.cancel();
+        }
+        metadataExecutor.shutdownNow();
+        synchronized (pendingLock) {
+            pendingDrawing = null;
+        }
     }
 
     @Nullable
@@ -105,7 +191,12 @@ public class IncomingDrawingPlugin extends Plugin {
             return null;
         }
 
-        Parcelable stream = intent.getParcelableExtra(Intent.EXTRA_STREAM);
+        Parcelable stream;
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            stream = intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri.class);
+        } else {
+            stream = intent.getParcelableExtra(Intent.EXTRA_STREAM);
+        }
         if (stream instanceof Uri) {
             return (Uri) stream;
         }
@@ -129,7 +220,11 @@ public class IncomingDrawingPlugin extends Plugin {
         ContentResolver.SCHEME_FILE.equals(scheme);
     }
 
-    private DrawingMetadata readMetadata(ContentResolver resolver, Uri uri) {
+    private DrawingMetadata readMetadata(
+        ContentResolver resolver,
+        Uri uri,
+        CancellationSignal cancellation
+    ) {
         String name = null;
         long size = -1;
 
@@ -142,7 +237,8 @@ public class IncomingDrawingPlugin extends Plugin {
                 },
                 null,
                 null,
-                null
+                null,
+                cancellation
             )
         ) {
             if (cursor != null && cursor.moveToFirst()) {
@@ -155,7 +251,7 @@ public class IncomingDrawingPlugin extends Plugin {
                     name = cursor.getString(nameColumn);
                 }
                 if (sizeColumn >= 0 && !cursor.isNull(sizeColumn)) {
-                    size = cursor.getLong(sizeColumn);
+                    size = Math.max(-1, cursor.getLong(sizeColumn));
                 }
             }
         } catch (RuntimeException ignored) {
@@ -165,14 +261,14 @@ public class IncomingDrawingPlugin extends Plugin {
         return new DrawingMetadata(name, size);
     }
 
-    private String normalizeName(
+    static String normalizeDrawingName(
         @Nullable String displayName,
-        Uri uri,
+        @Nullable String lastPathSegment,
         @Nullable String mimeType
     ) {
         String name = displayName;
         if (name == null || name.trim().isEmpty()) {
-            name = uri.getLastPathSegment();
+            name = lastPathSegment;
         }
         if (name == null || name.trim().isEmpty()) {
             name = "drawing";
@@ -190,16 +286,27 @@ public class IncomingDrawingPlugin extends Plugin {
             }
         }
 
+        // Providers may expose arbitrary names. Match the web library's limit
+        // after extension inference so every incoming drawing can be imported.
+        if (name.length() > 220) {
+            int extensionStart = name.lastIndexOf('.');
+            String extension = extensionStart >= 0 ? name.substring(extensionStart) : "";
+            if (extension.length() > 12) {
+                extension = "";
+            }
+            name = name.substring(0, 220 - extension.length()) + extension;
+        }
+
         return name;
     }
 
-    private boolean hasDrawingExtension(String name) {
+    private static boolean hasDrawingExtension(String name) {
         String lowerName = name.toLowerCase(Locale.ROOT);
         return lowerName.endsWith(".dxf") || lowerName.endsWith(".dwg");
     }
 
     @Nullable
-    private String extensionForMimeType(@Nullable String mimeType) {
+    private static String extensionForMimeType(@Nullable String mimeType) {
         if (mimeType == null) {
             return null;
         }

@@ -8,6 +8,8 @@ import {
   useState,
 } from "react";
 import { DRAWING_FILE_ACCEPT } from "../files/fileTypes";
+import { useBackNavigation } from "../app/backNavigation";
+import { filterAndSortEntries, type LibrarySort } from "./libraryPresentation";
 import { useI18n } from "../i18n/I18nProvider";
 import {
   copyLibraryEntry,
@@ -101,9 +103,14 @@ function libraryErrorKey(error: unknown): TranslationKey {
       return "invalidLibraryDestination";
     case "STORAGE_FULL":
       return "libraryStorageFull";
+    case "INVALID_FILE":
+      return "libraryInvalidFile";
+    case "FILE_TOO_LARGE":
+      return "libraryFileTooLarge";
     case "STORAGE_UNAVAILABLE":
-    case "NOT_FOUND":
       return "libraryStorageUnavailable";
+    case "NOT_FOUND":
+      return "libraryNotFound";
   }
 }
 
@@ -136,6 +143,9 @@ function folderLabel(
 export function DrawingLibrary({ onOpen, onClose }: Props) {
   const { locale, t } = useI18n();
   const inputRef = useRef<HTMLInputElement>(null);
+  const shellRef = useRef<HTMLDivElement>(null);
+  const busyRef = useRef(false);
+  const loadIdRef = useRef(0);
   const [currentFolderId, setCurrentFolderId] = useState(ROOT_FOLDER_ID);
   const [entries, setEntries] = useState<LibraryEntry[]>([]);
   const [recentEntries, setRecentEntries] = useState<LibraryEntry[]>([]);
@@ -149,8 +159,17 @@ export function DrawingLibrary({ onOpen, onClose }: Props) {
   const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<LibrarySort>("name");
+  const [noticeError, setNoticeError] = useState(false);
+  const visibleEntries = useMemo(
+    () => filterAndSortEntries(entries, query, sort, locale),
+    [entries, query, sort, locale],
+  );
+  const modal = textDialog ? "text" : destinationDialog ? "destination" : deleteEntry ? "delete" : selectedEntry ? "actions" : null;
 
   const reload = useCallback(async () => {
+    const loadId = ++loadIdRef.current;
     setLoading(true);
     try {
       const [children, folderPath, recent, folders] = await Promise.all([
@@ -161,14 +180,18 @@ export function DrawingLibrary({ onOpen, onClose }: Props) {
           : Promise.resolve([]),
         listLibraryFolders(),
       ]);
+      if (loadId !== loadIdRef.current) return;
       setEntries(children);
       setPath(folderPath);
       setRecentEntries(recent);
       setAllFolders(folders);
     } catch (error) {
+      if (loadId !== loadIdRef.current) return;
       setNotice(t(libraryErrorKey(error)));
+      setNoticeError(true);
+      setEntries([]);
     } finally {
-      setLoading(false);
+      if (loadId === loadIdRef.current) setLoading(false);
     }
   }, [currentFolderId, t]);
 
@@ -178,29 +201,59 @@ export function DrawingLibrary({ onOpen, onClose }: Props) {
 
   useEffect(() => {
     void reload();
+    return () => { loadIdRef.current += 1; };
   }, [reload]);
 
+  useEffect(() => { setQuery(""); }, [currentFolderId]);
+
   useEffect(() => {
-    if (!notice) {
+    if (!modal) return;
+    const dialog = shellRef.current?.querySelector<HTMLElement>("[aria-modal='true']");
+    if (!dialog) return;
+    const previous = document.activeElement as HTMLElement | null;
+    const controls = () => Array.from(dialog.querySelectorAll<HTMLElement>("button:not(:disabled), input, select, [tabindex='0']"));
+    controls()[0]?.focus();
+    const trapFocus = (event: KeyboardEvent) => {
+      if (event.key !== "Tab") return;
+      const elements = controls();
+      const first = elements[0];
+      const last = elements[elements.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault(); last?.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault(); first?.focus();
+      }
+    };
+    dialog.addEventListener("keydown", trapFocus);
+    return () => { dialog.removeEventListener("keydown", trapFocus); previous?.focus(); };
+  }, [modal]);
+
+  useEffect(() => {
+    if (!notice || noticeError) {
       return;
     }
 
     const timeout = window.setTimeout(() => setNotice(null), 3200);
     return () => window.clearTimeout(timeout);
-  }, [notice]);
+  }, [notice, noticeError]);
 
   const runOperation = useCallback(
     async (operation: () => Promise<void>, successKey?: TranslationKey) => {
+      if (busyRef.current) return;
+      busyRef.current = true;
       setBusy(true);
       try {
         await operation();
         if (successKey) {
           setNotice(t(successKey));
+          setNoticeError(false);
         }
         await reload();
       } catch (error) {
         setNotice(t(libraryErrorKey(error)));
+        setNoticeError(true);
       } finally {
+        busyRef.current = false;
         setBusy(false);
       }
     },
@@ -209,42 +262,70 @@ export function DrawingLibrary({ onOpen, onClose }: Props) {
 
   const openEntry = useCallback(
     async (entry: LibraryEntry) => {
+      if (busyRef.current || loading) return;
       if (entry.kind === "folder") {
         setCurrentFolderId(entry.id);
         return;
       }
 
+      busyRef.current = true;
       setBusy(true);
       try {
         const file = await openLibraryDrawing(entry.id);
         await onOpen(file, entry.id);
       } catch (error) {
         setNotice(t(libraryErrorKey(error)));
+        setNoticeError(true);
+      } finally {
+        busyRef.current = false;
         setBusy(false);
       }
     },
-    [onOpen, t],
+    [loading, onOpen, t],
   );
 
   const handleImport = useCallback(
     async (event: ChangeEvent<HTMLInputElement>) => {
-      const file = event.target.files?.[0];
+      const files = Array.from(event.target.files ?? []);
       event.target.value = "";
-      if (!file) {
+      if (files.length === 0 || busyRef.current) {
         return;
       }
 
+      busyRef.current = true;
       setBusy(true);
       try {
-        const entry = await importDrawingToLibrary(file, currentFolderId);
-        const storedFile = await openLibraryDrawing(entry.id);
-        await onOpen(storedFile, entry.id);
+        if (files.length === 1) {
+          const entry = await importDrawingToLibrary(files[0], currentFolderId);
+          const storedFile = await openLibraryDrawing(entry.id);
+          await onOpen(storedFile, entry.id);
+        } else {
+          let imported = 0;
+          let failed = 0;
+          let firstError: unknown;
+          for (const file of files) {
+            try {
+              await importDrawingToLibrary(file, currentFolderId);
+              imported += 1;
+            } catch (error) {
+              firstError ??= error;
+              failed += 1;
+            }
+          }
+          await reload();
+          setNotice(`${t("importedDrawings")}: ${imported}${failed ? ` · ${t("failedDrawings")}: ${failed}. ${t(libraryErrorKey(firstError))}` : ""}`);
+          setNoticeError(failed > 0);
+        }
       } catch (error) {
         setNotice(t(libraryErrorKey(error)));
+        setNoticeError(true);
+        await reload();
+      } finally {
+        busyRef.current = false;
         setBusy(false);
       }
     },
-    [currentFolderId, onOpen, t],
+    [currentFolderId, onOpen, reload, t],
   );
 
   const submitTextDialog = useCallback(() => {
@@ -296,6 +377,12 @@ export function DrawingLibrary({ onOpen, onClose }: Props) {
   );
 
   const goBack = useCallback(() => {
+    if (busyRef.current) return;
+    if (textDialog) { setTextDialog(null); return; }
+    if (destinationDialog) { setDestinationDialog(null); return; }
+    if (deleteEntry) { setDeleteEntry(null); return; }
+    if (selectedEntry) { setSelectedEntry(null); return; }
+    if (query) { setQuery(""); return; }
     if (path.length === 0) {
       onClose();
       return;
@@ -304,17 +391,19 @@ export function DrawingLibrary({ onOpen, onClose }: Props) {
     setCurrentFolderId(
       path.length === 1 ? ROOT_FOLDER_ID : path[path.length - 2].id,
     );
-  }, [onClose, path]);
+  }, [deleteEntry, destinationDialog, onClose, path, query, selectedEntry, textDialog]);
+  useBackNavigation(goBack, true);
 
   return (
-    <div className="app-shell library-shell" aria-busy={busy}>
-      <header className="library-topbar">
+    <div ref={shellRef} className="app-shell library-shell" aria-busy={busy || loading}>
+      <header className="library-topbar" inert={modal !== null}>
         <button
           type="button"
           className="icon-button"
           aria-label={t("back")}
           title={t("back")}
           onClick={goBack}
+          disabled={busy || loading}
         >
           <ArrowLeftIcon />
         </button>
@@ -329,17 +418,19 @@ export function DrawingLibrary({ onOpen, onClose }: Props) {
           aria-label={t("closeLibrary")}
           title={t("closeLibrary")}
           onClick={onClose}
+          disabled={busy}
         >
           <CloseIcon />
         </button>
       </header>
 
-      <main className="library-content">
+      <main className="library-content" inert={modal !== null}>
         <nav className="library-breadcrumbs" aria-label={t("mainFolder")}>
           <button
             type="button"
             className={path.length === 0 ? "active" : ""}
             onClick={() => setCurrentFolderId(ROOT_FOLDER_ID)}
+            disabled={busy || loading}
           >
             {t("mainFolder")}
           </button>
@@ -350,6 +441,7 @@ export function DrawingLibrary({ onOpen, onClose }: Props) {
                 type="button"
                 className={index === path.length - 1 ? "active" : ""}
                 onClick={() => setCurrentFolderId(folder.id)}
+                disabled={busy || loading}
               >
                 {folder.name}
               </button>
@@ -383,11 +475,12 @@ export function DrawingLibrary({ onOpen, onClose }: Props) {
             hidden
             type="file"
             accept={DRAWING_FILE_ACCEPT}
+            multiple
             onChange={handleImport}
           />
         </div>
 
-        {recentEntries.length > 0 ? (
+        {recentEntries.length > 0 && !query ? (
           <section className="recent-section">
             <h2>{t("recentDrawings")}</h2>
             <div className="recent-list">
@@ -412,34 +505,43 @@ export function DrawingLibrary({ onOpen, onClose }: Props) {
 
         <section className="library-entries-section">
           <h2>{t("filesAndFolders")}</h2>
+          <div className="library-filter-row">
+            <input type="search" value={query} onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape" && query) {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setQuery("");
+                }
+              }}
+              placeholder={t("searchLibrary")} aria-label={t("searchLibrary")} />
+            <select value={sort} onChange={(event) => setSort(event.target.value as LibrarySort)} aria-label={t("sortLibrary")}>
+              <option value="name">{t("sortName")}</option>
+              <option value="recent">{t("sortRecent")}</option>
+              <option value="size">{t("sortSize")}</option>
+            </select>
+          </div>
           {loading ? (
             <div className="library-loading" aria-label={t("loading")}>
               <span />
               <span />
               <span />
             </div>
-          ) : entries.length === 0 ? (
+          ) : visibleEntries.length === 0 ? (
             <div className="library-empty">
               <PlainFolderIcon />
-              <strong>{t("emptyFolderTitle")}</strong>
-              <p>{t("emptyFolderDescription")}</p>
+              <strong>{t(query ? "noSearchResults" : "emptyFolderTitle")}</strong>
+              {query ? <button type="button" className="cancel-button" onClick={() => setQuery("")}>{t("clearSearch")}</button> : <p>{t("emptyFolderDescription")}</p>}
             </div>
           ) : (
             <div className="library-entry-list">
-              {entries.map((entry) => (
+              {visibleEntries.map((entry) => (
                 <div
                   key={entry.id}
                   className="library-entry"
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => void openEntry(entry)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      void openEntry(entry);
-                    }
-                  }}
                 >
+                  <button type="button" className="library-entry-open" disabled={busy}
+                    onClick={() => void openEntry(entry)}>
                   <span
                     className={`library-entry-icon ${entry.kind}`}
                     aria-hidden="true"
@@ -461,6 +563,7 @@ export function DrawingLibrary({ onOpen, onClose }: Props) {
                   {entry.kind === "folder" ? (
                     <ChevronRightIcon className="entry-chevron" />
                   ) : null}
+                  </button>
                   <button
                     type="button"
                     className="entry-more-button"
@@ -482,7 +585,7 @@ export function DrawingLibrary({ onOpen, onClose }: Props) {
       </main>
 
       {notice ? (
-        <div className="library-notice" role="status">
+        <div className="library-notice" role={noticeError ? "alert" : "status"} onClick={() => setNotice(null)}>
           {notice}
         </div>
       ) : null}
@@ -571,6 +674,9 @@ export function DrawingLibrary({ onOpen, onClose }: Props) {
         >
           <form
             className="library-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label={t(textDialog.type === "create-folder" ? "newFolder" : "rename")}
             onSubmit={(event) => {
               event.preventDefault();
               submitTextDialog();

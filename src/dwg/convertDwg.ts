@@ -1,4 +1,7 @@
-import { replaceExtension } from "../files/fileTypes";
+import {
+  replaceExtension,
+  validateDrawingFileSize,
+} from "../files/fileTypes";
 import { inspectDwgInput } from "./diagnostics";
 import {
   AppError,
@@ -54,19 +57,31 @@ function runConversionWorker(
         name: "izcad-dwg-converter",
       },
     );
+    let settled = false;
 
     const cleanup = () => {
       clearTimeout(timeout);
       signal?.removeEventListener("abort", handleAbort);
+      worker.onmessage = null;
+      worker.onerror = null;
+      worker.onmessageerror = null;
       worker.terminate();
     };
 
     const handleAbort = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
       cleanup();
       reject(abortError());
     };
 
     const timeout = window.setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      settled = true;
       cleanup();
       reject(
         new AppError(
@@ -81,12 +96,17 @@ function runConversionWorker(
 
     worker.onmessage = (event: MessageEvent<DwgWorkerResponse>) => {
       const response = event.data;
-      if (response.id !== id) {
+      if (settled || !response || response.id !== id) {
         return;
       }
 
+      settled = true;
       cleanup();
       if (response.status === "success") {
+        if (!(response.output instanceof ArrayBuffer) || response.output.byteLength === 0) {
+          reject(new AppError("DWG_EXPORT_FAILED", "The DWG worker returned an empty drawing."));
+          return;
+        }
         resolve({
           output: response.output,
           savedView: response.savedView,
@@ -103,6 +123,10 @@ function runConversionWorker(
     };
 
     worker.onerror = (event) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
       cleanup();
       reject(
         new AppError(
@@ -113,14 +137,25 @@ function runConversionWorker(
       );
     };
 
-    worker.postMessage(
-      {
-        id,
-        input,
-        baseUrl: document.baseURI,
-      },
-      [input],
-    );
+    worker.onmessageerror = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      reject(new AppError("DWG_CONVERSION_FAILED", "The DWG worker response could not be read."));
+    };
+
+    try {
+      worker.postMessage(
+        { id, input, baseUrl: document.baseURI },
+        [input],
+      );
+    } catch (error) {
+      settled = true;
+      cleanup();
+      reject(error);
+    }
   });
 }
 
@@ -129,11 +164,27 @@ export async function convertDwgToDxf(
   signal?: AbortSignal,
 ): Promise<File> {
   try {
-    const input = await file.arrayBuffer();
+    if (signal?.aborted) {
+      throw abortError();
+    }
+    validateDrawingFileSize(file.size);
+    let input: ArrayBuffer;
+    try {
+      input = await file.arrayBuffer();
+    } catch (error) {
+      if (signal?.aborted) {
+        throw abortError();
+      }
+      throw new AppError("FILE_READ_FAILED", "The DWG file could not be read.", { cause: error });
+    }
     const { output, savedView } = await runConversionWorker(
       input,
       signal,
     );
+    if (signal?.aborted) {
+      throw abortError();
+    }
+    validateDrawingFileSize(output.byteLength);
 
     const renderFile = new File(
       [output],

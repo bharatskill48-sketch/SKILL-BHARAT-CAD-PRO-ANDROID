@@ -88,6 +88,11 @@ export function resolveSavedDrawingView(
   if (
     !view ||
     !bounds ||
+    !isFiniteNumber(origin?.x) ||
+    !isFiniteNumber(origin?.y) ||
+    !Object.values(bounds).every(isFiniteNumber) ||
+    bounds.minX > bounds.maxX ||
+    bounds.minY > bounds.maxY ||
     !isFiniteNumber(viewportAspect) ||
     viewportAspect <= 0
   ) {
@@ -99,8 +104,24 @@ export function resolveSavedDrawingView(
     return null;
   }
 
-  const halfHeight = normalized.viewHeight / 2;
-  const halfWidth = halfHeight * viewportAspect;
+  const width = normalized.viewHeight *
+    Math.max(normalized.aspectRatio ?? viewportAspect, viewportAspect);
+  const height = width / viewportAspect;
+  const center = {
+    x: normalized.center.x - origin.x,
+    y: normalized.center.y - origin.y,
+  };
+  if (
+    !Number.isFinite(width) ||
+    width <= 0 ||
+    !Number.isFinite(height) ||
+    !Number.isFinite(center.x) ||
+    !Number.isFinite(center.y)
+  ) {
+    return null;
+  }
+  const halfWidth = width / 2;
+  const halfHeight = height / 2;
   const viewMinX = normalized.center.x - halfWidth;
   const viewMaxX = normalized.center.x + halfWidth;
   const viewMinY = normalized.center.y - halfHeight;
@@ -116,15 +137,10 @@ export function resolveSavedDrawingView(
   }
 
   return {
-    center: {
-      x: normalized.center.x - origin.x,
-      y: normalized.center.y - origin.y,
-    },
+    center,
     // VIEWSIZE is the saved vertical field of view. Preserve the complete
     // saved desktop rectangle on narrower phone screens instead of cropping
     // it horizontally and making neighbouring sheets look overlapped.
-    width:
-      normalized.viewHeight *
-      Math.max(normalized.aspectRatio ?? viewportAspect, viewportAspect),
+    width,
   };
 }

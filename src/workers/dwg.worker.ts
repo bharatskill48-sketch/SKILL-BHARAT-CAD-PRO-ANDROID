@@ -10,6 +10,7 @@ import {
   type SavedDwgLayerStates,
 } from "../dwg/layerVisibility";
 import { annotateDxfXclips } from "../dwg/xclipMetadata";
+import { MAX_DRAWING_FILE_BYTES } from "../files/fileTypes";
 import type {
   AppErrorCode,
   DwgDiagnostic,
@@ -44,6 +45,7 @@ type DwgFailure = {
 type LibreDwgFileSystem = {
   writeFile(path: string, data: Uint8Array): void;
   readFile(path: string): Uint8Array;
+  stat(path: string): { size: number };
   unlink(path: string): void;
 };
 
@@ -388,9 +390,17 @@ async function convertWithLibreDwg(
       );
     }
 
+    if (runtime.FS.stat(outputPath).size > MAX_DRAWING_FILE_BYTES) {
+      throw new DwgWorkerError(
+        "FILE_TOO_LARGE",
+        "The converted drawing exceeds the viewer's file size limit.",
+        diagnosticWithEngineCode,
+      );
+    }
+    const rawOutput = runtime.FS.readFile(outputPath);
     const output = annotateDxfXclips(
       restoreDxfLayerStates(
-        runtime.FS.readFile(outputPath),
+        rawOutput,
         savedMetadata.layerStates,
       ),
     );

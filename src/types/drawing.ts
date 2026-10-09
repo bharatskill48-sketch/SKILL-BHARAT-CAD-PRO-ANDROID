@@ -23,6 +23,8 @@ export type ViewerHandle = {
 
 export type AppErrorCode =
   | "UNSUPPORTED_FORMAT"
+  | "EMPTY_FILE"
+  | "FILE_TOO_LARGE"
   | "FILE_READ_FAILED"
   | "DXF_OPEN_FAILED"
   | "DWG_CONVERSION_FAILED"

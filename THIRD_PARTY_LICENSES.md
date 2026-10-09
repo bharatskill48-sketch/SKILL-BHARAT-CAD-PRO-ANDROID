@@ -1,6 +1,6 @@
 # izCAD — Üçüncü Taraf Açık Kaynak Bildirimleri
 
-Son güncelleme: 27 Temmuz 2026
+Son güncelleme: 9 Ekim 2026
 
 Bu belge, izCAD Android uygulamasının çalışma zamanında kullanılan başlıca
 üçüncü taraf bileşenleri listeler. Kullanılmayan libdxfrw çalışma zamanı
@@ -14,7 +14,7 @@ projeden ve dağıtım varlıklarından kaldırılmıştır.
 | Three.js | 0.161.0 | MIT | `LICENSE-THREE-MIT.txt` |
 | dxf-viewer | 1.0.48 | MPL-2.0 | `LICENSE-MPL-2.0.txt` |
 | dxf-viewer içindeki dxf-parser türevi | 1.0.48 ile birlikte | MIT | `LICENSE-DXF-PARSER-MIT.txt` |
-| @capacitor/core ve @capacitor/android | 8.4.2 | MIT | `LICENSE-CAPACITOR-MIT.txt` |
+| @capacitor/core ve @capacitor/android | 8.4.3 | MIT | `LICENSE-CAPACITOR-MIT.txt` |
 | @capacitor/browser | 8.0.4 | MIT | `LICENSE-CAPACITOR-MIT.txt` |
 | @mlightcad/libredwg-web | 0.7.9 | GPL-3.0-only | `LICENSE` |
 | Liberation Sans tabanlı IzCadSans-Regular.ttf | 2.1.5 | SIL Open Font License 1.1 | `LICENSE-FONT-OFL-1.1.txt` |

@@ -26,7 +26,14 @@ export function LoadingScreen({
       </div>
       <p className="eyebrow">{fileName}</p>
       <h1>{t(phase)}</h1>
-      <div className="progress-track" aria-hidden="true">
+      <div
+        className="progress-track"
+        role="progressbar"
+        aria-label={t(phase)}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={percent ?? undefined}
+      >
         <span
           className={percent === null ? "indeterminate" : ""}
           style={percent === null ? undefined : { width: `${percent}%` }}

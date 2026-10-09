@@ -104,6 +104,7 @@ uniform int ${clipPointCount};
 uniform vec2 ${clipPolygon}[${MAX_CLIP_POINTS}];
 `;
   const fragmentClip = `
+  {
     bool izcadInsideClip = false;
     for (int izcadIndex = 0; izcadIndex < ${MAX_CLIP_POINTS}; izcadIndex++) {
         if (izcadIndex >= ${clipPointCount}) {
@@ -132,6 +133,7 @@ uniform vec2 ${clipPolygon}[${MAX_CLIP_POINTS}];
     if (!izcadInsideClip) {
         discard;
     }
+  }
 `;
 
   material.vertexShader = material.vertexShader
@@ -207,10 +209,18 @@ function applyClipMaterial(
     return;
   }
 
-  const patch = (material: Material): Material =>
-    material instanceof RawShaderMaterial
-      ? addClipShader(material, clip)
-      : material;
+  const patch = (material: Material): Material => {
+    if (!(material instanceof RawShaderMaterial)) {
+      return material;
+    }
+    const clipped = addClipShader(material, clip);
+    if (material.userData[MATERIAL_FLAG]) {
+      // Nested clipping replaces the per-object outer clip clone. Its shaders
+      // and uniforms are copied into the new clone, so release the old one.
+      material.dispose();
+    }
+    return clipped;
+  };
   object.material = Array.isArray(object.material)
     ? object.material.map(patch)
     : patch(object.material);

@@ -24,7 +24,12 @@ type I18nValue = {
 const I18nContext = createContext<I18nValue | null>(null);
 
 function getInitialLocale(): Locale {
-  const stored = localStorage.getItem(STORAGE_KEY);
+  let stored: string | null = null;
+  try {
+    stored = localStorage.getItem(STORAGE_KEY);
+  } catch {
+    // The interface remains usable when device storage is unavailable.
+  }
   if (stored === "en" || stored === "tr") {
     return stored;
   }
@@ -36,7 +41,11 @@ export function I18nProvider({ children }: PropsWithChildren) {
   const [locale, setLocaleState] = useState<Locale>(getInitialLocale);
 
   const setLocale = useCallback((nextLocale: Locale) => {
-    localStorage.setItem(STORAGE_KEY, nextLocale);
+    try {
+      localStorage.setItem(STORAGE_KEY, nextLocale);
+    } catch {
+      // Keep the language for this session even if it cannot be persisted.
+    }
     setLocaleState(nextLocale);
   }, []);
 

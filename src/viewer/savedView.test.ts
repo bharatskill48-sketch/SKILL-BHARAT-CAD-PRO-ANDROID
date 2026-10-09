@@ -68,4 +68,20 @@ describe("saved drawing view", () => {
       }),
     ).toBeNull();
   });
+
+  it("keeps a desktop view whose wide rectangle reaches the drawing on a phone", () => {
+    expect(resolveSavedDrawingView(
+      { center: { x: 140, y: 50 }, viewHeight: 40, aspectRatio: 3 },
+      bounds,
+      { x: 0, y: 0 },
+      0.5,
+    )).toEqual({ center: { x: 140, y: 50 }, width: 120 });
+  });
+
+  it("rejects invalid bounds, origins and overflowing view dimensions", () => {
+    const view = { center: { x: 50, y: 50 }, viewHeight: 40 };
+    expect(resolveSavedDrawingView(view, { ...bounds, minX: Infinity }, { x: 0, y: 0 }, 1)).toBeNull();
+    expect(resolveSavedDrawingView(view, bounds, { x: NaN, y: 0 }, 1)).toBeNull();
+    expect(resolveSavedDrawingView({ ...view, aspectRatio: Number.MAX_VALUE }, bounds, { x: 0, y: 0 }, 1)).toBeNull();
+  });
 });

@@ -15,6 +15,8 @@ import { CloseIcon, FolderIcon, ShieldIcon } from "../components/Icons";
 import { LanguageSwitch } from "../components/LanguageSwitch";
 import { LoadingScreen } from "../components/LoadingScreen";
 import { ViewerToolbar } from "../components/ViewerToolbar";
+import { dispatchBackNavigation, useBackNavigation } from "./backNavigation";
+import { version } from "../../package.json";
 import { convertDwgToDxf } from "../dwg/convertDwg";
 import { toDrawingFile } from "../files/fileTypes";
 import { useI18n } from "../i18n/I18nProvider";
@@ -80,24 +82,32 @@ function openExternalLink(event: MouseEvent<HTMLAnchorElement>): void {
   }
 
   event.preventDefault();
-  void Browser.open({ url: event.currentTarget.href });
+  void Browser.open({ url: event.currentTarget.href }).catch(() => undefined);
 }
 
 export function App() {
   const { locale, t } = useI18n();
   const [state, setState] = useState<AppState>({ status: "home" });
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [libraryNotice, setLibraryNotice] = useState(false);
   const viewerRef = useRef<ViewerHandle>(null);
   const requestIdRef = useRef(0);
   const incomingRequestIdRef = useRef(0);
   const handledIncomingIdsRef = useRef(new Set<string>());
   const conversionAbortRef = useRef<AbortController | null>(null);
+  const incomingAbortRef = useRef<AbortController | null>(null);
+  const lastDrawingRef = useRef<{ file: File; libraryEntryId?: string } | null>(null);
+  const pendingImportRef = useRef<{ file: File; requestId: number } | null>(null);
 
   const openFile = useCallback(async (file: File, libraryEntryId?: string) => {
     incomingRequestIdRef.current += 1;
+    incomingAbortRef.current?.abort();
     conversionAbortRef.current?.abort();
     conversionAbortRef.current = null;
     const requestId = ++requestIdRef.current;
+    lastDrawingRef.current = null;
+    pendingImportRef.current = null;
+    setLibraryNotice(false);
 
     let drawing: DrawingFile;
     try {
@@ -110,6 +120,8 @@ export function App() {
       return;
     }
 
+    lastDrawingRef.current = { file, libraryEntryId };
+    if (!libraryEntryId) pendingImportRef.current = { file, requestId };
     setLibraryOpen(false);
     setState({
       status: "loading",
@@ -118,12 +130,6 @@ export function App() {
       phase: drawing.format === "dwg" ? "converting" : "reading",
       progress: null,
     });
-
-    if (!libraryEntryId) {
-      void importDrawingToLibrary(file, ROOT_FOLDER_ID).catch((error: unknown) => {
-        console.warn("Drawing could not be saved to the local library.", error);
-      });
-    }
 
     const conversionController =
       drawing.format === "dwg" ? new AbortController() : null;
@@ -169,17 +175,30 @@ export function App() {
       }
 
       handledIncomingIdsRef.current.add(incoming.id);
+      // Only retain a bounded deduplication history during long sessions.
+      if (handledIncomingIdsRef.current.size > 100) {
+        handledIncomingIdsRef.current.delete(handledIncomingIdsRef.current.values().next().value!);
+      }
+      incomingAbortRef.current?.abort();
+      const controller = new AbortController();
+      incomingAbortRef.current = controller;
       const incomingRequestId = ++incomingRequestIdRef.current;
       const appRequestId = requestIdRef.current;
       let file: File;
 
       try {
-        file = await readIncomingDrawingFile(incoming);
+        file = await readIncomingDrawingFile(incoming, controller.signal);
       } catch (error) {
         if (
           incomingRequestId === incomingRequestIdRef.current &&
           appRequestId === requestIdRef.current
         ) {
+          requestIdRef.current += 1;
+          conversionAbortRef.current?.abort();
+          conversionAbortRef.current = null;
+          pendingImportRef.current = null;
+          lastDrawingRef.current = null;
+          setLibraryOpen(false);
           setState({
             status: "error",
             error: toAppError(error, "FILE_READ_FAILED"),
@@ -187,6 +206,7 @@ export function App() {
         }
         return;
       } finally {
+        if (incomingAbortRef.current === controller) incomingAbortRef.current = null;
         void incomingDrawingPlugin
           .acknowledgeDrawing({ id: incoming.id })
           .catch(() => undefined);
@@ -229,9 +249,9 @@ export function App() {
       if (drawing && !disposed) {
         await openIncomingDrawing(drawing);
       }
-    })().catch((error: unknown) => {
+    })().catch(() => {
       if (!disposed) {
-        console.error("Incoming drawing bridge could not be initialized.", error);
+        console.error("Incoming drawing bridge could not be initialized.");
       }
     });
 
@@ -254,7 +274,8 @@ export function App() {
           ...current,
           phase,
           progress:
-            total > 0 ? Math.min(1, Math.max(0, processed / total)) : null,
+            total > 0 && Number.isFinite(processed) && Number.isFinite(total)
+              ? Math.min(1, Math.max(0, processed / total)) : null,
         };
       });
     },
@@ -262,6 +283,13 @@ export function App() {
   );
 
   const handleViewerReady = useCallback(() => {
+    const pending = pendingImportRef.current;
+    pendingImportRef.current = null;
+    if (pending && pending.requestId === requestIdRef.current) {
+      void importDrawingToLibrary(pending.file, ROOT_FOLDER_ID).catch(() => {
+        if (pending.requestId === requestIdRef.current) setLibraryNotice(true);
+      });
+    }
     setState((current) => {
       if (current.status !== "loading" || !current.renderFile) {
         return current;
@@ -275,6 +303,7 @@ export function App() {
   }, []);
 
   const handleViewerError = useCallback((error: unknown) => {
+    pendingImportRef.current = null;
     setState({
       status: "error",
       error: toAppError(error, "DXF_OPEN_FAILED"),
@@ -286,46 +315,85 @@ export function App() {
     requestIdRef.current += 1;
     conversionAbortRef.current?.abort();
     conversionAbortRef.current = null;
+    incomingAbortRef.current?.abort();
+    incomingAbortRef.current = null;
+    pendingImportRef.current = null;
+    lastDrawingRef.current = null;
+    setLibraryNotice(false);
     setState({ status: "home" });
+  }, []);
+
+  const handleBack = useCallback(() => {
+    if (libraryOpen) {
+      setLibraryOpen(false);
+    } else if (state.status !== "home") {
+      closeDrawing();
+    } else if (Capacitor.isNativePlatform()) {
+      void incomingDrawingPlugin.exitApp().catch(() => undefined);
+    }
+  }, [closeDrawing, libraryOpen, state.status]);
+  useBackNavigation(handleBack);
+
+  useEffect(() => {
+    let disposed = false;
+    let backListener: PluginListenerHandle | null = null;
+    if (Capacitor.isNativePlatform()) {
+      void incomingDrawingPlugin.addListener("backPressed", dispatchBackNavigation)
+        .then((listener) => {
+          if (disposed) void listener.remove();
+          else backListener = listener;
+        }).catch(() => undefined);
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !event.defaultPrevented) {
+        event.preventDefault();
+        dispatchBackNavigation();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      disposed = true;
+      void backListener?.remove();
+      window.removeEventListener("keydown", onKeyDown);
+      requestIdRef.current += 1;
+      incomingRequestIdRef.current += 1;
+      conversionAbortRef.current?.abort();
+      incomingAbortRef.current?.abort();
+    };
   }, []);
 
   const sendCommand = useCallback((command: ViewerCommand) => {
     viewerRef.current?.execute(command);
   }, []);
 
+  const canvasRequestId = requestIdRef.current;
   const canvas =
     (state.status === "loading" && state.renderFile) ||
     state.status === "viewer" ? (
       <Suspense fallback={null}>
         <DrawingCanvas
           ref={viewerRef}
-          key={
-            state.status === "viewer"
-              ? state.renderFile.name + state.renderFile.lastModified
-              : state.renderFile!.name + state.renderFile!.lastModified
-          }
+          key={requestIdRef.current}
           file={
             state.status === "viewer" ? state.renderFile : state.renderFile!
           }
-          onProgress={handleProgress}
-          onReady={handleViewerReady}
-          onError={handleViewerError}
+          onProgress={(phase, processed, total) => {
+            if (canvasRequestId === requestIdRef.current) handleProgress(phase, processed, total);
+          }}
+          onReady={() => {
+            if (canvasRequestId === requestIdRef.current) handleViewerReady();
+          }}
+          onError={(error) => {
+            if (canvasRequestId === requestIdRef.current) handleViewerError(error);
+          }}
         />
       </Suspense>
     ) : null;
 
-  if (libraryOpen) {
-    return (
-      <DrawingLibrary
-        onClose={() => setLibraryOpen(false)}
-        onOpen={(file, libraryEntryId) => openFile(file, libraryEntryId)}
-      />
-    );
-  }
-
+  let content;
   if (state.status === "error") {
-    return (
-      <div className="app-shell">
+    content = (
+      <>
         <header className="topbar minimal">
           <div className="wordmark">izCAD</div>
           <LanguageSwitch />
@@ -333,14 +401,17 @@ export function App() {
         <ErrorScreen
           error={state.error}
           onOpenLibrary={() => setLibraryOpen(true)}
+          onRetry={lastDrawingRef.current ? () => {
+            const last = lastDrawingRef.current;
+            if (last) void openFile(last.file, last.libraryEntryId);
+          } : undefined}
+          onClose={closeDrawing}
         />
-      </div>
+      </>
     );
-  }
-
-  if (state.status === "home") {
-    return (
-      <div className="app-shell home">
+  } else if (state.status === "home") {
+    content = (
+      <>
         <header className="topbar">
           <div className="wordmark">
             iz<span>CAD</span>
@@ -409,29 +480,23 @@ export function App() {
                 {t("sourceCode")}
               </a>
             </nav>
+            <p className="version-copy">{t("appVersion")} {version.replace(/\.0$/, "")}</p>
           </section>
         </main>
-      </div>
+      </>
     );
-  }
-
-  if (state.status === "loading") {
-    return (
-      <div className="app-shell viewer-shell">
-        {canvas}
+  } else if (state.status === "loading") {
+    content = (
         <LoadingScreen
           phase={state.phase}
           progress={state.progress}
           fileName={state.drawing.name}
           onCancel={closeDrawing}
         />
-      </div>
     );
-  }
-
-  return (
-    <div className="app-shell viewer-shell">
-      {canvas}
+  } else {
+    content = (
+    <>
       <header className="viewer-header">
         <div className="file-heading">
           <span className="file-format">{state.drawing.format}</span>
@@ -466,6 +531,20 @@ export function App() {
       </header>
 
       <ViewerToolbar onCommand={sendCommand} />
+      {libraryNotice ? <div className="library-notice" role="status">{t("librarySaveFailed")}</div> : null}
+    </>
+    );
+  }
+
+  return (
+    <div className={`app-shell ${state.status === "home" ? "home" : "viewer-shell"}`}>
+      <div className="canvas-layer" inert={libraryOpen} aria-hidden={libraryOpen}>{canvas}</div>
+      <div className="app-content" hidden={libraryOpen}>{content}</div>
+      {libraryOpen ? (
+        <div className="library-overlay">
+          <DrawingLibrary onClose={() => setLibraryOpen(false)} onOpen={openFile} />
+        </div>
+      ) : null}
     </div>
   );
 }

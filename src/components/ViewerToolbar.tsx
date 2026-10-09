@@ -21,7 +21,7 @@ export function ViewerToolbar({ onCommand }: Props) {
   ];
 
   return (
-    <nav className="viewer-toolbar" aria-label="Viewer controls">
+    <nav className="viewer-toolbar" aria-label={t("viewerControls")}>
       {buttons.map(({ command, label, Icon }) => (
         <button
           key={command}

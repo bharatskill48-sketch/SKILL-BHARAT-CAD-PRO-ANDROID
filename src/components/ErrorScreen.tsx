@@ -8,11 +8,15 @@ import { FolderIcon } from "./Icons";
 type Props = {
   error: AppError;
   onOpenLibrary(): void;
+  onRetry?(): void;
+  onClose?(): void;
 };
 
 const errorTranslation = {
   UNSUPPORTED_FORMAT: "unsupportedFormat",
   FILE_READ_FAILED: "fileReadFailed",
+  EMPTY_FILE: "emptyFile",
+  FILE_TOO_LARGE: "fileTooLarge",
   DXF_OPEN_FAILED: "dxfOpenFailed",
   DWG_CONVERSION_FAILED: "dwgConversionFailed",
   DWG_UNSUPPORTED_VERSION: "dwgUnsupportedVersion",
@@ -25,7 +29,7 @@ const errorTranslation = {
   RENDER_FAILED: "renderFailed",
 } as const;
 
-export function ErrorScreen({ error, onOpenLibrary }: Props) {
+export function ErrorScreen({ error, onOpenLibrary, onRetry, onClose }: Props) {
   const { t } = useI18n();
   const diagnostic = error.details?.dwg;
 
@@ -55,6 +59,16 @@ export function ErrorScreen({ error, onOpenLibrary }: Props) {
         <FolderIcon />
         <span>{t("myDrawings")}</span>
       </button>
+      {onRetry ? (
+        <button type="button" className="cancel-button" onClick={onRetry}>
+          {t("retryDrawing")}
+        </button>
+      ) : null}
+      {onClose ? (
+        <button type="button" className="cancel-button" onClick={onClose}>
+          {t("back")}
+        </button>
+      ) : null}
     </main>
   );
 }
