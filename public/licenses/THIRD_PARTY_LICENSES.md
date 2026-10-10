@@ -1,6 +1,6 @@
 # izCAD — Üçüncü Taraf Açık Kaynak Bildirimleri
 
-Son güncelleme: 9 Ekim 2026
+Son güncelleme: 10 Ekim 2026 — uygulama sürümü 2.0
 
 Bu belge, izCAD Android uygulamasının çalışma zamanında kullanılan başlıca
 üçüncü taraf bileşenleri listeler. Kullanılmayan libdxfrw çalışma zamanı
@@ -17,6 +17,15 @@ projeden ve dağıtım varlıklarından kaldırılmıştır.
 | @capacitor/core ve @capacitor/android | 8.4.3 | MIT | `LICENSE-CAPACITOR-MIT.txt` |
 | @capacitor/browser | 8.0.4 | MIT | `LICENSE-CAPACITOR-MIT.txt` |
 | @mlightcad/libredwg-web | 0.7.9 | GPL-3.0-only | `LICENSE` |
+| PDF.js (`pdfjs-dist`) | 6.4.299 | Apache License 2.0; ek varlık lisansları aşağıda | `LICENSE-APACHE-2.0.txt`, `LICENSE-PDFJS-THIRD-PARTY.txt` |
+| fflate | 0.8.3 | MIT | `LICENSE-FFLATE-MIT.txt` |
+| libarchive-wasm JavaScript bağları | 1.2.0 | MIT | `LICENSE-LIBARCHIVE-WASM-MIT.txt` |
+| libarchive (arşiv WASM içinde) | 3.7.7 | BSD-2-Clause, bazı kaynaklarda BSD-3-Clause; BLAKE2 için Apache-2.0 seçeneği | `LICENSE-LIBARCHIVE.txt`, `LICENSE-LIBARCHIVE-SOURCE-NOTICES.txt`, `LICENSE-APACHE-2.0.txt` |
+| OpenSSL (arşiv WASM içinde) | 3.4.1 | Apache License 2.0 | `LICENSE-OPENSSL-3.txt` |
+| zlib (arşiv WASM içinde) | 1.3.1 | zlib | `LICENSE-ZLIB.txt` |
+| libbzip2 (arşiv WASM içinde) | 1.0.8 | bzip2 lisansı | `LICENSE-BZIP2.txt` |
+| XZ Utils liblzma (arşiv WASM içinde) | 5.6.4 | BSD Zero Clause (0BSD) | `LICENSE-XZ-0BSD.txt` |
+| Emscripten JavaScript/WASM çalışma zamanı ve musl/LLVM yardımcıları | libarchive-wasm derlemesindeki Emscripten 4.0.5 | MIT/NCSA; musl bileşen bildirimleri; Apache-2.0 WITH LLVM-exception ve ilgili eski LLVM lisansları | `LICENSE-EMSCRIPTEN.txt`, `LICENSE-MUSL.txt`, `LICENSE-LLVM.txt` |
 | Liberation Sans tabanlı IzCadSans-Regular.ttf | 2.1.5 | SIL Open Font License 1.1 | `LICENSE-FONT-OFL-1.1.txt` |
 | AndroidX, Android Core SplashScreen ve Apache Cordova Android çalışma zamanı | Gradle dosyalarında sabitlenen sürümler | Apache License 2.0 | `LICENSE-APACHE-2.0.txt` |
 
@@ -28,6 +37,15 @@ Bağımlılıkların kaynak depoları:
 - Capacitor: https://github.com/ionic-team/capacitor
 - LibreDWG WebAssembly: https://github.com/mlightcad/libredwg-web
 - GNU LibreDWG: https://github.com/LibreDWG/libredwg
+- PDF.js: https://github.com/mozilla/pdf.js/tree/v6.4.299
+- fflate: https://github.com/101arrowz/fflate
+- libarchive-wasm: https://github.com/ofk/libarchive-wasm/tree/v1.2.0
+- libarchive: https://github.com/libarchive/libarchive/tree/v3.7.7
+- OpenSSL: https://github.com/openssl/openssl/tree/openssl-3.4.1
+- zlib: https://github.com/madler/zlib/tree/v1.3.1
+- bzip2: https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz
+- XZ Utils: https://github.com/tukaani-project/xz/tree/v5.6.4
+- Emscripten: https://github.com/emscripten-core/emscripten/tree/4.0.5
 - AndroidX: https://github.com/androidx/androidx
 - Apache Cordova Android: https://github.com/apache/cordova-android
 
@@ -38,6 +56,18 @@ Bağımlılıkların kaynak depoları:
 - dxf-viewer: Copyright (c) 2024 SIA SPH Engineering ve katkıda bulunanlar.
 - dxf-parser türevi: Copyright (c) 2015 GDS Storefront Estimating.
 - Capacitor: Copyright (c) 2017-present Drifty Co.
+- PDF.js: Copyright 2024 Mozilla Foundation; ek görüntü/font bileşenlerinin
+  bildirimleri `LICENSE-PDFJS-THIRD-PARTY.txt` içinde korunur.
+- fflate: Copyright (c) 2026 Arjun Barrett.
+- libarchive-wasm: Copyright (c) 2021 ofk.
+- libarchive: Tim Kientzle, Martin Matuska, Michihiro NAKAJIMA ve ilgili
+  kaynak dosyalarının diğer yazarları; özgün bildirimler
+  `LICENSE-LIBARCHIVE-SOURCE-NOTICES.txt` içindedir.
+- OpenSSL: Copyright (c) 1998-2025 The OpenSSL Project Authors;
+  Copyright (c) 1995-1998 Eric A. Young, Tim J. Hudson.
+- zlib: (C) 1995-2022 Jean-loup Gailly and Mark Adler.
+- bzip2/libbzip2: Copyright (C) 1996-2019 Julian R Seward.
+- XZ Utils: Copyright (C) The XZ Utils authors and contributors.
 - LibreDWG ve WebAssembly bağları: Free Software Foundation, LibreDWG
   katkıcıları ve MLightCAD/libredwg-web katkıcılarının ilgili kaynak dosyası
   bildirimleri geçerlidir.
@@ -47,6 +77,45 @@ Bağımlılıkların kaynak depoları:
 
 LibreDWG için ayrıntılı telif bildirimleri, karşılık gelen kaynak kod
 dağıtımındaki dosya başlıklarında korunmalıdır.
+
+## PDF.js ek varlıkları
+
+PDF.js dağıtımındaki lisans metinleri değiştirilmeden hem
+`LICENSE-PDFJS-THIRD-PARTY.txt` içinde hem ilgili çalışma zamanı varlıklarının
+yanında paketlenir:
+
+| Varlık | Lisans/bildirim |
+|---|---|
+| Adobe CMap verileri | Adobe telif bildirimi ve BSD-3-Clause koşulları (`cmaps/LICENSE`) |
+| Foxit standart fontları | PDFium BSD-3-Clause (`standard_fonts/LICENSE_FOXIT`) |
+| PDF.js standart Liberation fontları | GPL-2.0 ve gömülü font istisnası (`standard_fonts/LICENSE_LIBERATION`) |
+| OpenJPEG JPEG2000 kod çözücüsü | BSD-2-Clause (`wasm/LICENSE_OPENJPEG`) |
+| JBIG2 kod çözücüsü | PDFium BSD-3-Clause (`wasm/LICENSE_JBIG2`) |
+| qcms renk yönetimi | MIT (`wasm/LICENSE_QCMS`) |
+| PDF.js ICC renk profili | CC0 1.0 Universal (`iccs/LICENSE`) |
+| PDF.js görüntü kod çözücü bağları | Apache-2.0 (`wasm/LICENSE_PDFJS_*`) |
+
+PDF.js'in standart Liberation fontları kendi GPL-2.0 ve font istisnası
+koşulları altında ayrı font dosyalarıdır; CAD çizim fontunun OFL lisansı bu
+dosyalara uygulanmaz. Font kullanılan veya gömülen belgeler, lisansın font
+istisnası kapsamında yalnızca bu nedenle GPL kapsamına girmez. Tam font
+lisansı PDF.js sürümünün
+`external/standard_fonts/LICENSE_LIBERATION` metninde yer alır.
+
+## Arşiv WebAssembly derlemesi
+
+`libarchive-wasm` npm paketinin MIT beyanı yalnızca JavaScript bağlarının
+lisansını tek başına açıklamak için yeterlidir. Paketlenen `libarchive.wasm`
+için temel C kütüphanesi ve statik bağlı bağımlılıkların lisansları ayrıca
+korunur. Sürüm kaynakları, derleme dosyaları ve eşleşen WASM SHA-256 bilgisi
+`NOTICE-ARCHIVE-RUNTIME.md` içindedir.
+
+Bağlanan XZ bileşeni yalnızca 0BSD lisanslı `liblzma` kütüphanesidir; XZ'nin
+GPL/LGPL lisanslı komut satırı/betik ve derleme araçları izCAD içinde
+paketlenmez. libarchive'in BLAKE2 dosyalarında sunulan üç seçenekten Apache
+License 2.0 seçeneği kullanılır. Arşiv motorunun burada listelenen kütüphane
+lisansları GPL-3.0 ile birlikte dağıtıma uygundur; özgün telif ve lisans
+koşulları korunur.
 
 ## GPL-3.0-only dağıtım notu
 

@@ -1,4 +1,5 @@
-import { detectDrawingFormat, MAX_DRAWING_FILE_BYTES } from "../files/fileTypes";
+import { detectDrawingFormat, fileSizeLimit, isArchiveFormat } from "../files/fileTypes";
+import { archiveEntry, normalizeArchivePath, throwIfArchiveAborted, validateArchiveEntries, type ExtractedArchiveFile } from "../files/archiveRules";
 import type { DrawingFormat } from "../types/drawing";
 
 // Retain the installed app's database and schema when upgrading to 2.0.
@@ -302,7 +303,7 @@ export async function importDrawingToLibrary(file: File, parentId = ROOT_FOLDER_
   if (!Number.isSafeInteger(file.size) || file.size <= 0) {
     throw new LibraryError("INVALID_FILE");
   }
-  if (file.size > MAX_DRAWING_FILE_BYTES) { throw new LibraryError("FILE_TOO_LARGE"); }
+  if (file.size > fileSizeLimit(format)) { throw new LibraryError("FILE_TOO_LARGE"); }
   return inTransaction([ENTRY_STORE, CONTENT_STORE], "readwrite", async (transaction) => {
     const entries = await readEntries(transaction);
     ensureFolderExists(entries, parentId);
@@ -338,7 +339,7 @@ async function readStoredDrawing(transaction: IDBTransaction, entryId: string): 
   if (!(content.blob instanceof Blob) || content.blob.size !== entry.size || content.blob.size <= 0) {
     throw new LibraryError("INVALID_FILE");
   }
-  if (content.blob.size > MAX_DRAWING_FILE_BYTES) {
+  if (content.blob.size > fileSizeLimit(entry.format)) {
     throw new LibraryError("FILE_TOO_LARGE");
   }
   return {
@@ -365,6 +366,77 @@ export async function openLibraryDrawing(entryId: string): Promise<File> {
   return inTransaction([ENTRY_STORE, CONTENT_STORE], "readonly", async (transaction) => {
     const { file } = await readStoredDrawing(transaction, entryId);
     return file;
+  });
+}
+
+/** Preserve relative archive folders and commit all selected documents together. */
+export async function importArchiveFilesToLibrary(
+  files: readonly ExtractedArchiveFile[],
+  parentId: string,
+  folderName: string,
+  signal?: AbortSignal,
+): Promise<{ folder: LibraryFolderEntry; entries: LibraryDrawingEntry[] }> {
+  throwIfArchiveAborted(signal);
+  if (!files.length || !isValidEntryName(folderName)) throw new LibraryError("INVALID_FILE");
+  const normalized = files.map(({ path, file }) => {
+    const safePath = normalizeArchivePath(path);
+    const format = detectDrawingFormat(safePath);
+    if (!format || isArchiveFormat(format) || file.size <= 0 ||
+        file.name !== safePath.split("/").slice(-1)[0]) throw new LibraryError("INVALID_FILE");
+    return { path: safePath, file, format };
+  });
+  validateArchiveEntries(normalized.map(({ path, file }) => archiveEntry(path, file.size)));
+  const filePaths = new Set(normalized.map(({ path }) => path.toLowerCase()));
+  for (const { path } of normalized) {
+    const parts = path.toLowerCase().split("/");
+    for (let end = 1; end < parts.length; end++) {
+      if (filePaths.has(parts.slice(0, end).join("/"))) throw new LibraryError("INVALID_FILE");
+    }
+  }
+  return inTransaction([ENTRY_STORE, CONTENT_STORE], "readwrite", async (transaction) => {
+    const existing = await readEntries(transaction);
+    ensureFolderExists(existing, parentId);
+    throwIfArchiveAborted(signal);
+    const cancel = () => { try { transaction.abort(); } catch { /* Already completed. */ } };
+    const cleanup = () => signal?.removeEventListener("abort", cancel);
+    signal?.addEventListener("abort", cancel, { once: true });
+    transaction.addEventListener("complete", cleanup, { once: true });
+    transaction.addEventListener("abort", cleanup, { once: true });
+    const now = Date.now();
+    const entryStore = transaction.objectStore(ENTRY_STORE);
+    const contentStore = transaction.objectStore(CONTENT_STORE);
+    const folder: LibraryFolderEntry = {
+      id: createId(), kind: "folder", parentId,
+      name: createUniqueEntryName(folderName,
+        existing.filter((entry) => entry.parentId === parentId).map((entry) => entry.name), false),
+      createdAt: now, updatedAt: now,
+    };
+    entryStore.add(folder);
+    const folders = new Map<string, string>([["", folder.id]]);
+    const imported: LibraryDrawingEntry[] = [];
+    for (const { path, file, format } of normalized) {
+      const parts = path.split("/");
+      let destination = folder.id;
+      for (let end = 1; end < parts.length; end++) {
+        const key = parts.slice(0, end).join("/").toLowerCase();
+        let id = folders.get(key);
+        if (!id) {
+          id = createId();
+          entryStore.add({ id, kind: "folder", parentId: destination, name: parts[end - 1], createdAt: now, updatedAt: now } satisfies LibraryFolderEntry);
+          folders.set(key, id);
+        }
+        destination = id;
+      }
+      const entry: LibraryDrawingEntry = {
+        id: createId(), kind: "drawing", parentId: destination, name: parts[parts.length - 1], format,
+        mimeType: file.type || "application/octet-stream", size: file.size,
+        lastModified: file.lastModified || now, lastOpenedAt: 0, createdAt: now, updatedAt: now,
+      };
+      entryStore.add(entry);
+      contentStore.add({ id: entry.id, blob: file.slice(0, file.size, entry.mimeType) } satisfies LibraryContent);
+      imported.push(entry);
+    }
+    return { folder, entries: imported };
   });
 }
 

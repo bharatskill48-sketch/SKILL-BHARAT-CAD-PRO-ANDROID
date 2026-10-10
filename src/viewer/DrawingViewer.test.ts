@@ -229,4 +229,52 @@ describe("drawing viewer lifecycle", () => {
     viewer.destroy();
     expect(cancel).toHaveBeenCalledWith(12);
   });
+
+  it("uses a compact index without retaining the full source document", async () => {
+    const geometry = { units: "mm", snaps: [], entities: [], limited: false, completeBounds: false };
+    state.load.mockImplementation(async () => { state.current.parsedDxf = { izcadMeasurement: geometry }; });
+    const viewer = new DrawingViewer({} as HTMLElement);
+    await viewer.load(new File(["0\nEOF\n"], "test.dxf"), vi.fn());
+    expect(viewer.getMeasurementGeometry()).toBe(geometry);
+    expect(state.current.parsedDxf).toBeNull();
+    viewer.destroy();
+  });
+
+  it("measures taps in drawing coordinates and ignores dragging and pinch gestures", async () => {
+    const pick = vi.fn();
+    const viewer = new DrawingViewer({} as HTMLElement, undefined, pick);
+    await viewer.load(new File(["0\nEOF\n"], "test.dxf"), vi.fn());
+    const canvas = state.current.canvas;
+    canvas.getBoundingClientRect = () => ({ left: 20, top: 10, width: 100, height: 200 });
+    state.current.camera.updateProjectionMatrix();
+    const emit = (type: string, id: number, x: number, y: number) => {
+      canvas.dispatchEvent(Object.assign(new Event(type), { pointerId: id, clientX: x, clientY: y, pointerType: "touch", button: 0 }));
+    };
+    viewer.configureMeasurement({ enabled: true, mode: "distance", points: [], snapping: true, entity: null });
+    emit("pointerdown", 1, 70, 110); emit("pointerup", 1, 70, 110);
+    expect(pick).toHaveBeenCalledOnce();
+    expect(pick.mock.calls[0][0].point).toEqual({ x: 0, y: 0 });
+    emit("pointerdown", 1, 70, 110); emit("pointermove", 1, 90, 130); emit("pointermove", 1, 70, 110); emit("pointerup", 1, 70, 110);
+    expect(pick).toHaveBeenCalledOnce();
+    emit("pointerdown", 1, 70, 110); emit("pointerdown", 2, 80, 100); emit("pointerup", 1, 70, 110); emit("pointerup", 2, 80, 100);
+    expect(pick).toHaveBeenCalledOnce();
+    emit("pointerdown", 1, 70, 110); emit("pointerup", 1, 70, 110);
+    expect(pick).toHaveBeenCalledTimes(2);
+    viewer.configureMeasurement({ enabled: false, mode: "distance", points: [], snapping: true, entity: null });
+    emit("pointerdown", 1, 70, 110); emit("pointerup", 1, 70, 110);
+    expect(pick).toHaveBeenCalledTimes(2);
+    viewer.destroy();
+  });
+
+  it("updates measurement projections after pan and removes the listener on close", async () => {
+    const changed = vi.fn();
+    const viewer = new DrawingViewer({} as HTMLElement, undefined, undefined, changed);
+    await viewer.load(new File(["0\nEOF\n"], "test.dxf"), vi.fn());
+    changed.mockClear();
+    state.current.canvas.dispatchEvent(new Event("__dxf_viewChanged"));
+    expect(changed).toHaveBeenCalledOnce();
+    viewer.destroy();
+    state.current.canvas.dispatchEvent(new Event("__dxf_viewChanged"));
+    expect(changed).toHaveBeenCalledOnce();
+  });
 });

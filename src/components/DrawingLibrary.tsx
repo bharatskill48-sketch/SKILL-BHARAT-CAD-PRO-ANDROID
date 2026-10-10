@@ -7,7 +7,9 @@ import {
   useRef,
   useState,
 } from "react";
-import { DRAWING_FILE_ACCEPT } from "../files/fileTypes";
+import { DRAWING_FILE_ACCEPT, isArchiveFormat } from "../files/fileTypes";
+import { ArchiveError, openArchive, type ArchiveEntry, type ArchiveSession } from "../files/archive";
+import { throwIfArchiveAborted } from "../files/archiveRules";
 import { useBackNavigation } from "../app/backNavigation";
 import { filterAndSortEntries, type LibrarySort } from "./libraryPresentation";
 import { useI18n } from "../i18n/I18nProvider";
@@ -17,6 +19,7 @@ import {
   deleteLibraryEntry,
   getLibraryPath,
   importDrawingToLibrary,
+  importArchiveFilesToLibrary,
   LibraryError,
   type LibraryEntry,
   type LibraryFolderEntry,
@@ -50,6 +53,17 @@ import { LanguageSwitch } from "./LanguageSwitch";
 type Props = {
   onOpen(file: File, libraryEntryId: string): void | Promise<void>;
   onClose(): void;
+  incomingArchive?: File | null;
+  onIncomingArchiveHandled?(): void;
+};
+
+type ArchiveDialog = {
+  file: File;
+  phase: "loading" | "ready" | "extracting" | "error";
+  entries: ArchiveEntry[];
+  selected: Set<string>;
+  progress: number;
+  error: string | null;
 };
 
 type TextDialogState =
@@ -90,6 +104,11 @@ function stopPropagation(event: MouseEvent<HTMLButtonElement>): void {
 }
 
 function libraryErrorKey(error: unknown): TranslationKey {
+  if (error instanceof ArchiveError) {
+    return error.code === "ENCRYPTED" ? "archiveEncryptedUnsupported" :
+      error.code === "LIMIT_EXCEEDED" ? "archiveLimitExceeded" :
+        error.code === "INVALID_PATH" ? "archiveInvalidPath" : "archiveOpenFailed";
+  }
   if (!(error instanceof LibraryError)) {
     return "libraryOperationFailed";
   }
@@ -140,12 +159,16 @@ function folderLabel(
   return `${rootLabel} / ${names.join(" / ")}`;
 }
 
-export function DrawingLibrary({ onOpen, onClose }: Props) {
+export function DrawingLibrary({ onOpen, onClose, incomingArchive, onIncomingArchiveHandled }: Props) {
   const { locale, t } = useI18n();
   const inputRef = useRef<HTMLInputElement>(null);
   const shellRef = useRef<HTMLDivElement>(null);
   const busyRef = useRef(false);
   const loadIdRef = useRef(0);
+  const archiveControllerRef = useRef<AbortController | null>(null);
+  const archiveSessionRef = useRef<ArchiveSession | null>(null);
+  const archiveGenerationRef = useRef(0);
+  const [archiveDialog, setArchiveDialog] = useState<ArchiveDialog | null>(null);
   const [currentFolderId, setCurrentFolderId] = useState(ROOT_FOLDER_ID);
   const [entries, setEntries] = useState<LibraryEntry[]>([]);
   const [recentEntries, setRecentEntries] = useState<LibraryEntry[]>([]);
@@ -166,7 +189,7 @@ export function DrawingLibrary({ onOpen, onClose }: Props) {
     () => filterAndSortEntries(entries, query, sort, locale),
     [entries, query, sort, locale],
   );
-  const modal = textDialog ? "text" : destinationDialog ? "destination" : deleteEntry ? "delete" : selectedEntry ? "actions" : null;
+  const modal = archiveDialog ? "archive" : textDialog ? "text" : destinationDialog ? "destination" : deleteEntry ? "delete" : selectedEntry ? "actions" : null;
 
   const reload = useCallback(async () => {
     const loadId = ++loadIdRef.current;
@@ -195,6 +218,82 @@ export function DrawingLibrary({ onOpen, onClose }: Props) {
     }
   }, [currentFolderId, t]);
 
+  const closeArchive = useCallback(() => {
+    archiveGenerationRef.current += 1;
+    archiveControllerRef.current?.abort();
+    archiveControllerRef.current = null;
+    archiveSessionRef.current?.close();
+    archiveSessionRef.current = null;
+    setArchiveDialog(null);
+  }, []);
+
+  const prepareArchive = useCallback(async (file: File, entryId?: string) => {
+    archiveControllerRef.current?.abort();
+    archiveSessionRef.current?.close();
+    archiveSessionRef.current = null;
+    const generation = ++archiveGenerationRef.current;
+    const controller = new AbortController();
+    archiveControllerRef.current = controller;
+    setArchiveDialog({ file, phase: "loading", entries: [], selected: new Set(), progress: 0, error: null });
+    try {
+      const session = await openArchive(file, controller.signal);
+      if (controller.signal.aborted || generation !== archiveGenerationRef.current) { session.close(); return; }
+      archiveSessionRef.current = session;
+      // Retain the original archive independently from its extracted documents.
+      if (!entryId) {
+        await importDrawingToLibrary(file, currentFolderId);
+        await reload();
+      }
+      if (controller.signal.aborted || generation !== archiveGenerationRef.current) return;
+      setArchiveDialog({ file, phase: "ready", entries: session.entries,
+        selected: new Set(session.entries.filter((entry) => entry.supported).map((entry) => entry.path)), progress: 0, error: null });
+    } catch (error) {
+      if (controller.signal.aborted || generation !== archiveGenerationRef.current) return;
+      archiveSessionRef.current?.close();
+      archiveSessionRef.current = null;
+      setArchiveDialog({ file, phase: "error", entries: [], selected: new Set(), progress: 0, error: t(libraryErrorKey(error)) });
+    }
+  }, [currentFolderId, reload, t]);
+
+  useEffect(() => {
+    if (!incomingArchive) return;
+    void prepareArchive(incomingArchive);
+    onIncomingArchiveHandled?.();
+  }, [incomingArchive, onIncomingArchiveHandled, prepareArchive]);
+
+  useEffect(() => () => {
+    archiveGenerationRef.current += 1;
+    archiveControllerRef.current?.abort();
+    archiveSessionRef.current?.close();
+  }, []);
+
+  const extractArchive = useCallback(async () => {
+    if (!archiveDialog || archiveDialog.phase !== "ready" || !archiveDialog.selected.size || !archiveSessionRef.current) return;
+    const session = archiveSessionRef.current;
+    const controller = new AbortController();
+    archiveControllerRef.current = controller;
+    const generation = archiveGenerationRef.current;
+    const selection = Array.from(archiveDialog.selected);
+    setArchiveDialog((dialog) => dialog ? { ...dialog, phase: "extracting", progress: 0 } : null);
+    try {
+      const files = await session.extract(selection, controller.signal, (done, total) => {
+        if (generation === archiveGenerationRef.current) setArchiveDialog((dialog) => dialog ? { ...dialog, progress: total ? done / total : 0 } : null);
+      });
+      throwIfArchiveAborted(controller.signal);
+      const folderName = archiveDialog.file.name.replace(/\.(?:zip|rar)$/i, "") || "Archive";
+      const result = await importArchiveFilesToLibrary(files, currentFolderId, folderName, controller.signal);
+      if (controller.signal.aborted || generation !== archiveGenerationRef.current) return;
+      await reload();
+      closeArchive();
+      setCurrentFolderId(result.folder.id);
+      setNotice(`${t("archiveImported")}: ${result.entries.length}`);
+      setNoticeError(false);
+    } catch (error) {
+      if (controller.signal.aborted || generation !== archiveGenerationRef.current) return;
+      setArchiveDialog((dialog) => dialog ? { ...dialog, phase: session.closed ? "error" : "ready", error: t(libraryErrorKey(error)) } : null);
+    }
+  }, [archiveDialog, closeArchive, currentFolderId, reload, t]);
+
   useEffect(() => {
     void requestPersistentLibraryStorage();
   }, []);
@@ -211,9 +310,10 @@ export function DrawingLibrary({ onOpen, onClose }: Props) {
     const dialog = shellRef.current?.querySelector<HTMLElement>("[aria-modal='true']");
     if (!dialog) return;
     const previous = document.activeElement as HTMLElement | null;
-    const controls = () => Array.from(dialog.querySelectorAll<HTMLElement>("button:not(:disabled), input, select, [tabindex='0']"));
+    const controls = () => Array.from(dialog.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled), select:not(:disabled), [tabindex='0']"));
     controls()[0]?.focus();
     const trapFocus = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && modal === "archive") { event.preventDefault(); closeArchive(); return; }
       if (event.key !== "Tab") return;
       const elements = controls();
       const first = elements[0];
@@ -226,7 +326,7 @@ export function DrawingLibrary({ onOpen, onClose }: Props) {
     };
     dialog.addEventListener("keydown", trapFocus);
     return () => { dialog.removeEventListener("keydown", trapFocus); previous?.focus(); };
-  }, [modal]);
+  }, [closeArchive, modal]);
 
   useEffect(() => {
     if (!notice || noticeError) {
@@ -272,7 +372,8 @@ export function DrawingLibrary({ onOpen, onClose }: Props) {
       setBusy(true);
       try {
         const file = await openLibraryDrawing(entry.id);
-        await onOpen(file, entry.id);
+        if (isArchiveFormat(entry.format)) await prepareArchive(file, entry.id);
+        else await onOpen(file, entry.id);
       } catch (error) {
         setNotice(t(libraryErrorKey(error)));
         setNoticeError(true);
@@ -281,7 +382,7 @@ export function DrawingLibrary({ onOpen, onClose }: Props) {
         setBusy(false);
       }
     },
-    [loading, onOpen, t],
+    [loading, onOpen, prepareArchive, t],
   );
 
   const handleImport = useCallback(
@@ -298,7 +399,8 @@ export function DrawingLibrary({ onOpen, onClose }: Props) {
         if (files.length === 1) {
           const entry = await importDrawingToLibrary(files[0], currentFolderId);
           const storedFile = await openLibraryDrawing(entry.id);
-          await onOpen(storedFile, entry.id);
+          if (isArchiveFormat(entry.format)) await prepareArchive(storedFile, entry.id);
+          else await onOpen(storedFile, entry.id);
         } else {
           let imported = 0;
           let failed = 0;
@@ -325,7 +427,7 @@ export function DrawingLibrary({ onOpen, onClose }: Props) {
         setBusy(false);
       }
     },
-    [currentFolderId, onOpen, reload, t],
+    [currentFolderId, onOpen, prepareArchive, reload, t],
   );
 
   const submitTextDialog = useCallback(() => {
@@ -377,6 +479,7 @@ export function DrawingLibrary({ onOpen, onClose }: Props) {
   );
 
   const goBack = useCallback(() => {
+    if (archiveDialog) { closeArchive(); return; }
     if (busyRef.current) return;
     if (textDialog) { setTextDialog(null); return; }
     if (destinationDialog) { setDestinationDialog(null); return; }
@@ -391,7 +494,7 @@ export function DrawingLibrary({ onOpen, onClose }: Props) {
     setCurrentFolderId(
       path.length === 1 ? ROOT_FOLDER_ID : path[path.length - 2].id,
     );
-  }, [deleteEntry, destinationDialog, onClose, path, query, selectedEntry, textDialog]);
+  }, [archiveDialog, closeArchive, deleteEntry, destinationDialog, onClose, path, query, selectedEntry, textDialog]);
   useBackNavigation(goBack, true);
 
   return (
@@ -593,6 +696,51 @@ export function DrawingLibrary({ onOpen, onClose }: Props) {
       {busy ? (
         <div className="library-busy" aria-hidden="true">
           <span />
+        </div>
+      ) : null}
+
+      {archiveDialog ? (
+        <div className="library-modal-backdrop" onClick={closeArchive}>
+          <section className="library-dialog archive-dialog" role="dialog" aria-modal="true"
+            aria-label={t("archiveTitle")} onClick={(event) => event.stopPropagation()}>
+            <h2>{t("archiveTitle")}</h2>
+            <strong>{archiveDialog.file.name}</strong>
+            <p>{t("archiveDescription")}</p>
+            {archiveDialog.phase === "loading" ? <p className="archive-status" role="status">{t("archiveLoading")}</p> : null}
+            {archiveDialog.error ? <p className="archive-status" role="alert">{archiveDialog.error}</p> : null}
+            {archiveDialog.entries.length > 0 ? (
+              <>
+                <div className="archive-selection-actions">
+                  <button type="button" disabled={archiveDialog.phase !== "ready"}
+                    onClick={() => setArchiveDialog({ ...archiveDialog, selected: new Set(archiveDialog.entries.filter((entry) => entry.supported).map((entry) => entry.path)) })}>{t("archiveSelectAll")}</button>
+                  <button type="button" disabled={archiveDialog.phase !== "ready"}
+                    onClick={() => setArchiveDialog({ ...archiveDialog, selected: new Set() })}>{t("archiveSelectNone")}</button>
+                </div>
+                <div className="archive-entry-list">
+                  {archiveDialog.entries.map((entry) => (
+                    <label key={entry.path} className={`archive-entry${entry.supported ? "" : " archive-unsupported"}`}>
+                      <input type="checkbox" checked={archiveDialog.selected.has(entry.path)} disabled={!entry.supported || archiveDialog.phase !== "ready"}
+                        onChange={(event) => {
+                          const selected = new Set(archiveDialog.selected);
+                          if (event.target.checked) selected.add(entry.path); else selected.delete(entry.path);
+                          setArchiveDialog({ ...archiveDialog, selected });
+                        }} />
+                      <span className="archive-entry-copy"><span>{entry.path}{entry.directory ? "/" : ""}</span>
+                        <small>{entry.directory ? t("folderName") : `${formatBytes(entry.size, locale)}${entry.supported ? "" : ` · ${t("archiveUnsupportedFile")}`}`}</small></span>
+                    </label>
+                  ))}
+                </div>
+              </>
+            ) : null}
+            {archiveDialog.phase === "ready" && !archiveDialog.entries.some((entry) => entry.supported)
+              ? <p className="archive-status">{t("archiveNoSupportedFiles")}</p> : null}
+            {archiveDialog.phase === "extracting" ? <p className="archive-status" role="status">{t("archiveImporting")} {Math.round(archiveDialog.progress * 100)}%</p> : null}
+            <div className="dialog-actions">
+              <button type="button" className="dialog-cancel" onClick={closeArchive}>{t("cancel")}</button>
+              <button type="button" className="dialog-confirm" disabled={archiveDialog.phase !== "ready" || !archiveDialog.selected.size}
+                onClick={() => void extractArchive()}>{t("archiveExtract")} ({archiveDialog.selected.size})</button>
+            </div>
+          </section>
         </div>
       ) : null}
 

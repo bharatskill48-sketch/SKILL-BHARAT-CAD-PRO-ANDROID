@@ -27,6 +27,12 @@ görüntülemek için geliştirilmiş açık kaynak bir CAD görüntüleyicidir.
 ### Özellikler
 
 - DXF ve DWG dosyalarını cihazdan seçme
+- PDF dosyalarını çevrimdışı açma, sayfa değiştirme ve yakınlaştırma
+- ZIP ve tek parçalı, şifresiz RAR arşivlerini listeleme; seçilen DXF/DWG/PDF dosyalarını klasör yapısıyla kitaplığa çıkarma
+- CAD üzerinde iki nokta mesafesi, toplam uzunluk, kapalı çokgen alanı/çevresi ve açı ölçümü
+- Çizgi, çoklu çizgi, daire, yay ve elips uzunluğu; uç/orta/merkez noktalarına tutunma ve birim seçimi
+- Koyu arka planla uyumlu şeffaf Android durum çubuğu ve okunur açık renk simgeler
+- Aşırı uzak kayıtlı DWG görünümünde içeriğe uygun ilk yakınlaştırma
 - Açılan çizimleri uygulamaya özel çevrimdışı Çizim Kitaplığı'nda saklama
 - Kitaplıkta klasör oluşturma, yeniden adlandırma, kopyalama, taşıma ve silme
 - Kitaplıkta klasör içinde arama, ad/tarih/boyut sıralaması ve toplu dosya ekleme
@@ -43,10 +49,13 @@ görüntülemek için geliştirilmiş açık kaynak bir CAD görüntüleyicidir.
 
 ### Kapsam
 
-izCAD yalnızca görüntüleyicidir. Çizim içeriğini düzenleme, ölçülendirme, CAD
-formatında değişiklik kaydetme, bulut senkronizasyonu ve kullanıcı hesabı
-özellikleri içermez. Çizim Kitaplığı yalnızca kullanıcının seçtiği özgün
-DXF/DWG dosyasının cihazdaki uygulamaya özel bir kopyasını yönetir.
+izCAD bir görüntüleyici ve 2B CAD ölçüm aracıdır. Ölçümler geçicidir; çizim
+içeriğini değiştirme, not ekleme veya düzenlenmiş CAD dosyası kaydetme özelliği
+yoktur. PDF üzerinde ölçüm yapılmaz. Çizim Kitaplığı özgün DXF/DWG/PDF ve arşiv
+dosyalarını cihazda saklar; arşivden yalnızca desteklenen CAD/PDF dosyaları çıkarılır.
+Şifreli veya çok parçalı arşivler ve şifreli PDF bu sürümde desteklenmez.
+Ölçü birimi bilinmeyen dosyalarda kullanıcı çizimin birimini seçmelidir.
+Elips ve eşit olmayan ölçekle dönüştürülmüş eğriler yaklaşık olarak işaretlenir.
 
 DWG formatının çok sayıda sürümü ve üreticiye özel nesnesi bulunduğu için her
 DWG dosyasının eksiksiz görüntüleneceği garanti edilmez. Desteklenmeyen veya
@@ -61,6 +70,8 @@ bozuk nesneler kontrollü bir hata oluşturabilir.
 - dxf-viewer ve Three.js
 - `@mlightcad/libredwg-web@0.7.9`
 - Web Worker ve WebAssembly
+- PDF.js (yerel worker, font, CMap ve görüntü çözümleme dosyaları)
+- fflate ve libarchive WebAssembly
 
 DWG dosyası ayrı bir Web Worker içinde DXF'e dönüştürülür. Elde edilen DXF
 çizimi `dxf-viewer` ile WebGL üzerinde görüntülenir. Bütün işlem cihazda
@@ -148,6 +159,12 @@ upload them to a server.
 ### Features
 
 - Select DXF and DWG files from the device
+- Open PDFs offline, change pages and zoom
+- Preview ZIP and single-volume, unencrypted RAR archives; extract selected CAD/PDF files into library folders
+- Measure 2D distance, path length, polygon area/perimeter and angles in CAD drawings
+- Read line/polyline/circle/arc/ellipse lengths with endpoint/midpoint/center snapping and unit selection
+- Transparent Android system bars with readable light icons on the dark interface
+- Fit drawing content when a saved DWG camera is excessively distant
 - Keep opened drawings in the app-private offline Drawing Library
 - Create folders and rename, copy, move, or delete library items
 - Search the current folder, sort by name/date/size, and import multiple drawings
@@ -164,10 +181,13 @@ upload them to a server.
 
 ### Scope
 
-izCAD is a viewer only. It does not edit drawing content, save CAD
-modifications, provide measurement, synchronize with the cloud, or use user
-accounts. The Drawing Library manages only an app-private on-device copy of
-the original DXF/DWG file selected by the user.
+izCAD is a viewer with temporary 2D CAD measurement tools. It does not edit
+drawings, add annotations or save modified CAD files. PDFs have no measurement
+tools. The library keeps original DXF/DWG/PDF and archive files on the device;
+archive extraction imports supported CAD/PDF documents only. Encrypted or
+multipart archives and password-protected PDFs are not supported in this version.
+Users must select the drawing unit when it is unspecified. Ellipse lengths and
+nonuniformly scaled curves are marked approximate.
 
 DWG has many versions and vendor-specific objects, so complete rendering of
 every DWG file cannot be guaranteed. Unsupported or damaged objects may
@@ -182,6 +202,8 @@ produce a controlled error.
 - dxf-viewer and Three.js
 - `@mlightcad/libredwg-web@0.7.9`
 - Web Workers and WebAssembly
+- PDF.js with local workers, fonts, CMaps and image decoders
+- fflate and libarchive WebAssembly
 
 The DWG file is converted to DXF in a dedicated Web Worker. The resulting DXF
 is rendered with `dxf-viewer` and WebGL. The entire process stays on the

@@ -1,13 +1,20 @@
 # izCAD 2.0 — Play Store güncelleme rehberi
 
-Hazırlık tarihi: **9 Ekim 2026**. Bu sürüm mevcut uygulamanın güncellemesidir.
+Hazırlık tarihi: **10 Ekim 2026**. Bu sürüm mevcut uygulamanın güncellemesidir.
 
-Yerel doğrulama: 90 web testi, üretim build'i ve 24 Android kaynak kontrolü geçti.
-Tarayıcıda DXF açma, bozuk dosyada hata, kitaplık, toplu ekleme, arama ve
-portre/yatay görünüm denendi. `npm audit` bilinen açık raporlamadı.
-Native Gradle test/lint ve APK/AAB derlemesi, Gradle önbelleği erişim izni
-iptal edildiği için bu çalışma sırasında tamamlanmadı. Mevcut eski APK,
-bu 2.0 değişikliklerini içermez. Aşağıdaki adımlarla yeni paket üretilmelidir.
+Yerel doğrulama: **157 web testi, 7 Android testi, üretim derlemesi ve 25 Android
+kaynak kontrolü geçti.** Release lint sıfır hata bildirdi; 19 kaynak/araç zinciri
+uyarısı var. Güncel debug APK ve imzasız AAB üretildi; paketlerin üretim
+dosyalarıyla birebir eşleşmesi doğrulandı. Tarayıcıda 3.000 mm kenar, 5 m
+köşegen, 14 m çevre ve 12 m² alan; PDF sayfa geçişi/yakınlaştırma; ZIP ve RAR
+seçimli çıkarma denendi. RAR4/RAR5 motoru gerçek upstream test dosyalarıyla
+doğrulandı. Görseldeki özgün DWG dosyası sağlanmadığından o dosyada ilk
+yakınlaştırma ve Android durum çubuğu için son gerçek cihaz kontrolü gerekir.
+
+Bu 2.0 paketi geçici 2B CAD ölçümü, PDF görüntüleme ve arşiv içe aktarma içerir.
+Çizim üstüne not ekleme, düzenlenmiş DWG kaydetme ve PDF ölçümü yoktur.
+Şifreli PDF/arşiv, çok parçalı arşiv ve ZIP64 desteklenmez. PDF için güncel
+Android System WebView kullanılmalıdır.
 
 ## Sürüm ve kullanıcı verileri
 

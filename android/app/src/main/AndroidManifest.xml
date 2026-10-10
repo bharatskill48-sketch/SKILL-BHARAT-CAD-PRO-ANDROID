@@ -23,7 +23,7 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <!-- Open DXF and DWG documents directly from Android file managers. -->
+            <!-- Open CAD, PDF and archive documents from Android file managers. -->
             <intent-filter android:label="@string/app_name">
                 <action android:name="android.intent.action.VIEW" />
 
@@ -42,11 +42,17 @@
                 <data android:mimeType="application/x-autocad" />
                 <data android:mimeType="application/autocad_dwg" />
                 <data android:mimeType="image/vnd.dwg" />
+                <data android:mimeType="application/pdf" />
+                <data android:mimeType="application/zip" />
+                <data android:mimeType="application/x-zip-compressed" />
+                <data android:mimeType="application/vnd.rar" />
+                <data android:mimeType="application/x-rar-compressed" />
+                <data android:mimeType="application/x-rar" />
                 <!-- Some Android file providers label CAD files as generic binary data. -->
                 <data android:mimeType="application/octet-stream" />
             </intent-filter>
 
-            <!-- Also make izCAD available in the share sheet for a single CAD file. -->
+            <!-- Also offer izCAD in the share sheet for a single supported file. -->
             <intent-filter android:label="@string/app_name">
                 <action android:name="android.intent.action.SEND" />
 
@@ -62,6 +68,12 @@
                 <data android:mimeType="application/x-autocad" />
                 <data android:mimeType="application/autocad_dwg" />
                 <data android:mimeType="image/vnd.dwg" />
+                <data android:mimeType="application/pdf" />
+                <data android:mimeType="application/zip" />
+                <data android:mimeType="application/x-zip-compressed" />
+                <data android:mimeType="application/vnd.rar" />
+                <data android:mimeType="application/x-rar-compressed" />
+                <data android:mimeType="application/x-rar" />
                 <data android:mimeType="application/octet-stream" />
             </intent-filter>
         </activity>

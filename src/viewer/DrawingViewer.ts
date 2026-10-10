@@ -17,6 +17,15 @@ import {
   DEFAULT_VIEWER_OVERLAY_RESERVE,
   fitPaddingForViewport,
 } from "./viewerLayout";
+import {
+  nearestEntity, nearestSnap,
+  type MeasurementGeometry, type MeasurementSettings,
+  type MeasurableEntity, type SnapPoint,
+} from "./measurementGeometry";
+import type { DrawingPoint } from "./savedView";
+import { selectInitialDrawingBounds } from "./initialView";
+
+export type MeasurementPick = { point: DrawingPoint; snapped: SnapPoint["kind"] | null; entity: MeasurableEntity | null };
 
 installXclipRendering(DxfViewer);
 
@@ -43,6 +52,41 @@ export class DrawingViewer {
   private destroyed = false;
   private ready = false;
   private initialFitFrame: number | null = null;
+  private geometry: MeasurementGeometry = { units: "drawing", entities: [], snaps: [], limited: false, completeBounds: false, fitBounds: [], fitCompleteBounds: false };
+  private measurement: MeasurementSettings | null = null;
+  private readonly touches = new Map<number, { x: number; y: number; time: number; moved: boolean }>();
+  private multiTouch = false;
+  private readonly pointerDown = (event: PointerEvent): void => {
+    if (!this.measurement?.enabled || !this.ready) return;
+    this.touches.set(event.pointerId, { x: event.clientX, y: event.clientY, time: performance.now(), moved: false });
+    try { this.viewer.GetCanvas().setPointerCapture(event.pointerId); } catch { /* Synthetic events or a detached canvas. */ }
+    if (this.touches.size > 1) this.multiTouch = true;
+  };
+  private readonly pointerMove = (event: PointerEvent): void => {
+    const start = this.touches.get(event.pointerId);
+    if (start && Math.hypot(event.clientX - start.x, event.clientY - start.y) > 8) start.moved = true;
+  };
+  private readonly pointerCancel = (event: PointerEvent): void => {
+    this.touches.delete(event.pointerId);
+    if (!this.touches.size) this.multiTouch = false;
+  };
+  private readonly pointerUp = (event: PointerEvent): void => {
+    const start = this.touches.get(event.pointerId);
+    const canPick = start && !start.moved && Math.hypot(event.clientX - start.x, event.clientY - start.y) <= 8 && !this.multiTouch && performance.now() - start.time < 1000 && (event.button === 0 || event.pointerType === "touch");
+    this.pointerCancel(event);
+    if (!canPick || !this.measurement?.enabled || !this.ready) return;
+    const canvas = this.viewer.GetCanvas();
+    const rect = canvas.getBoundingClientRect();
+    const v = new Vector3((event.clientX - rect.left) * 2 / rect.width - 1, -(event.clientY - rect.top) * 2 / rect.height + 1, 0).unproject(this.viewer.GetCamera());
+    const origin = this.viewer.GetOrigin();
+    let point: DrawingPoint = { x: v.x + origin.x, y: v.y + origin.y };
+    const camera = this.viewer.GetCamera();
+    const tolerance = 18 * (camera.right - camera.left) / camera.zoom / rect.width;
+    const snapped = this.measurement.snapping && this.measurement.mode !== "object" ? nearestSnap(this.geometry.snaps, point, tolerance) : null;
+    if (snapped) point = { x: snapped.x, y: snapped.y };
+    const entity = this.measurement.mode === "object" ? nearestEntity(this.geometry.entities, point, tolerance) : null;
+    this.onPick?.({ point, snapped: snapped?.kind ?? null, entity });
+  };
   private readonly onContextLost = (event: Event): void => {
     event.preventDefault();
     if (this.destroyed) {
@@ -63,6 +107,8 @@ export class DrawingViewer {
   constructor(
     container: HTMLElement,
     private readonly onError?: (error: unknown) => void,
+    private readonly onPick?: (pick: MeasurementPick) => void,
+    private readonly onViewChanged?: () => void,
   ) {
     this.viewer = new DxfViewer(container, {
       autoResize: true,
@@ -72,7 +118,8 @@ export class DrawingViewer {
       colorCorrection: true,
       blackWhiteInversion: true,
       pointSize: 3,
-      retainParsedDxf: false,
+      // The worker replaces the parsed document with its compact measurement index.
+      retainParsedDxf: true,
       preserveDrawingBuffer: false,
     });
     // dxf-viewer returns a partially initialized instance when WebGL creation
@@ -84,6 +131,12 @@ export class DrawingViewer {
       "webglcontextlost",
       this.onContextLost,
     );
+    const canvas = this.viewer.GetCanvas();
+    canvas.addEventListener("pointerdown", this.pointerDown);
+    canvas.addEventListener("pointermove", this.pointerMove);
+    canvas.addEventListener("pointerup", this.pointerUp);
+    canvas.addEventListener("pointercancel", this.pointerCancel);
+    canvas.addEventListener("__dxf_viewChanged", this.viewChanged);
   }
 
   async load(file: File, onProgress: ProgressCallback): Promise<void> {
@@ -158,8 +211,11 @@ export class DrawingViewer {
       if (this.destroyed || loadId !== this.loadId) {
         throw abortError();
       }
+      const retained = (this.viewer as unknown as { parsedDxf?: { izcadMeasurement?: MeasurementGeometry } }).parsedDxf;
+      this.geometry = retained?.izcadMeasurement ?? { units: "drawing", entities: [], snaps: [], limited: false, completeBounds: false, fitBounds: [], fitCompleteBounds: false };
+      (this.viewer as unknown as { parsedDxf: unknown }).parsedDxf = null;
       if (!this.applySavedView()) {
-        this.fit();
+        this.fit(true);
         // The ready callback mounts the header and toolbar after this promise
         // resolves. On the next frame their measured bounds include safe-area
         // insets, so refine the initial fit once without changing a saved camera.
@@ -168,7 +224,7 @@ export class DrawingViewer {
             this.initialFitFrame = null;
             if (!this.destroyed && loadId === this.loadId && this.ready) {
               try {
-                this.fit();
+                this.fit(true);
               } catch (error) {
                 this.onError?.(new AppError("RENDER_FAILED", undefined, { cause: error }));
               }
@@ -177,6 +233,7 @@ export class DrawingViewer {
         }
       }
       this.ready = true;
+      this.onViewChanged?.();
     } catch (error) {
       if (!this.destroyed && loadId === this.loadId) {
         try {
@@ -213,10 +270,29 @@ export class DrawingViewer {
         break;
       case "reset":
         if (!this.applySavedView()) {
-          this.fit();
+          this.fit(true);
         }
         break;
     }
+  }
+
+  private readonly viewChanged = (): void => { this.onViewChanged?.(); };
+
+  getMeasurementGeometry(): MeasurementGeometry { return this.geometry; }
+
+  configureMeasurement(settings: MeasurementSettings): void {
+    this.measurement = settings;
+    if (!settings.enabled) { this.touches.clear(); this.multiTouch = false; }
+  }
+
+  projectPoints(points: readonly DrawingPoint[]): DrawingPoint[] {
+    const camera = this.viewer.GetCamera(), origin = this.viewer.GetOrigin();
+    const canvas = this.viewer.GetCanvas();
+    const width = canvas.clientWidth || canvas.width, height = canvas.clientHeight || canvas.height;
+    return points.map((point) => {
+      const v = new Vector3(point.x - origin.x, point.y - origin.y, 0).project(camera);
+      return { x: (v.x + 1) * width / 2, y: (1 - v.y) * height / 2 };
+    });
   }
 
   destroy(): void {
@@ -233,6 +309,13 @@ export class DrawingViewer {
     const canvas = this.viewer.GetCanvas();
     const renderer = this.viewer.GetRenderer();
     canvas.removeEventListener("webglcontextlost", this.onContextLost);
+    canvas.removeEventListener("pointerdown", this.pointerDown);
+    canvas.removeEventListener("pointermove", this.pointerMove);
+    canvas.removeEventListener("pointerup", this.pointerUp);
+    canvas.removeEventListener("pointercancel", this.pointerCancel);
+    canvas.removeEventListener("__dxf_viewChanged", this.viewChanged);
+    this.touches.clear();
+    this.geometry = { units: "drawing", entities: [], snaps: [], limited: false, completeBounds: false, fitBounds: [], fitCompleteBounds: false };
     try {
       this.viewer.Destroy();
     } finally {
@@ -248,10 +331,13 @@ export class DrawingViewer {
     camera.zoom = Math.min(1000, Math.max(0.01, camera.zoom * factor));
     camera.updateProjectionMatrix();
     this.viewer.Render();
+    this.onViewChanged?.();
   }
 
-  private fit(): void {
-    const bounds = this.viewer.GetBounds();
+  private fit(initial = false): void {
+    const bounds = initial && this.geometry.fitCompleteBounds
+      ? selectInitialDrawingBounds(this.viewer.GetBounds(), this.geometry.fitBounds)
+      : this.viewer.GetBounds();
     if (!bounds) {
       return;
     }
@@ -278,6 +364,7 @@ export class DrawingViewer {
       fitPaddingForViewport(viewportHeight, reserve),
     );
     this.viewer.Render();
+    this.onViewChanged?.();
   }
 
   private applySavedView(): boolean {
@@ -289,7 +376,7 @@ export class DrawingViewer {
     const origin = this.viewer.GetOrigin();
     const resolved = resolveSavedDrawingView(
       this.savedView,
-      this.viewer.GetBounds(),
+      this.geometry.fitCompleteBounds ? selectInitialDrawingBounds(this.viewer.GetBounds(), this.geometry.fitBounds) : this.viewer.GetBounds(),
       origin,
       viewportAspect,
     );

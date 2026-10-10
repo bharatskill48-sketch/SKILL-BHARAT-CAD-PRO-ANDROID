@@ -1,5 +1,6 @@
 import {
   copyFile,
+  cp,
   mkdir,
   readFile,
   rm,
@@ -46,6 +47,17 @@ await Promise.all([
   ),
 ]);
 
+const pdfPackageDirectory = resolve("node_modules", "pdfjs-dist");
+const pdfDestination = resolve("public", "pdfjs");
+await mkdir(pdfDestination, { recursive: true });
+await Promise.all([
+  copyFile(resolve(pdfPackageDirectory, "legacy", "build", "pdf.worker.min.mjs"), resolve(pdfDestination, "pdf.worker.min.mjs")),
+  copyFile(resolve(pdfPackageDirectory, "LICENSE"), resolve(pdfDestination, "LICENSE")),
+  ...["cmaps", "standard_fonts", "wasm", "iccs"].map((directory) =>
+    cp(resolve(pdfPackageDirectory, directory), resolve(pdfDestination, directory), { recursive: true })),
+  copyFile(resolve("node_modules", "libarchive-wasm", "dist", "libarchive.wasm"), resolve(destinationDirectory, "libarchive.wasm")),
+]);
+
 await Promise.all([
   rm(resolve(destinationDirectory, "libdxfrw-web.js"), { force: true }),
   rm(resolve(destinationDirectory, "libdxfrw.wasm"), { force: true }),
@@ -60,6 +72,19 @@ const distributableLicenseFiles = [
   "LICENSE-CAPACITOR-MIT.txt",
   "LICENSE-DXF-PARSER-MIT.txt",
   "LICENSE-FONT-OFL-1.1.txt",
+  "LICENSE-FFLATE-MIT.txt",
+  "LICENSE-PDFJS-THIRD-PARTY.txt",
+  "LICENSE-LIBARCHIVE-WASM-MIT.txt",
+  "LICENSE-LIBARCHIVE.txt",
+  "LICENSE-LIBARCHIVE-SOURCE-NOTICES.txt",
+  "LICENSE-OPENSSL-3.txt",
+  "LICENSE-ZLIB.txt",
+  "LICENSE-BZIP2.txt",
+  "LICENSE-XZ-0BSD.txt",
+  "LICENSE-EMSCRIPTEN.txt",
+  "LICENSE-MUSL.txt",
+  "LICENSE-LLVM.txt",
+  "NOTICE-ARCHIVE-RUNTIME.md",
   "LICENSE-MPL-2.0.txt",
   "LICENSE-REACT-MIT.txt",
   "LICENSE-THREE-MIT.txt",

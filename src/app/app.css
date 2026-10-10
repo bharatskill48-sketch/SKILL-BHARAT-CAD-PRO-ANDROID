@@ -1,4 +1,5 @@
 :root {
+  color-scheme: dark;
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
@@ -18,6 +19,56 @@
   --accent-ink: #21180c;
   --danger: #ff766f;
 }
+
+.drawing-surface { position: absolute; inset: 0; width: 100%; height: 100%; }
+.measurement-active .drawing-surface canvas { cursor: crosshair; }
+.measurement-overlay { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; pointer-events: none; overflow: hidden; }
+.measurement-overlay polyline, .measurement-overlay polygon { stroke: var(--accent); stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.measurement-overlay polygon { fill: rgba(255, 181, 71, 0.12); }
+.measurement-overlay circle { stroke: #081019; stroke-width: 2; fill: var(--accent-bright); }
+.measurement-overlay text { font-size: 13px; font-weight: 800; fill: var(--accent-bright); stroke: #081019; stroke-width: 3; paint-order: stroke; }
+.viewer-toolbar.with-measure { grid-template-columns: repeat(5, 1fr); }
+.viewer-toolbar button[aria-pressed="true"] { background: rgba(255, 181, 71, 0.16); color: var(--accent-bright); }
+.measurement-panel { position: absolute; z-index: 3; right: 14px; left: 14px; bottom: calc(94px + env(safe-area-inset-bottom)); max-width: 480px; max-height: calc(100dvh - 190px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); margin: 0 auto; overflow: auto; padding: 12px 14px; border: 1px solid var(--line); border-radius: 18px; background: rgba(13, 23, 32, 0.96); backdrop-filter: blur(18px); box-shadow: 0 10px 32px rgba(0, 0, 0, 0.32); }
+.measurement-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: .85rem; }
+.measurement-title .icon-button { width: 32px; height: 32px; border-radius: 9px; }
+.measurement-modes { display: grid; grid-template-columns: repeat(5, 1fr); gap: 3px; margin: 8px 0; }
+.measurement-modes button, .measurement-actions button { min-height: 34px; padding: 5px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); color: var(--text); font-size: .63rem; cursor: pointer; }
+.measurement-modes button[aria-pressed="true"] { border-color: var(--accent); background: rgba(255, 181, 71, .13); color: var(--accent-bright); }
+.measurement-result { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; min-height: 30px; color: var(--accent-bright); font-variant-numeric: tabular-nums; }
+.measurement-result strong { font-size: 1.3rem; overflow-wrap: anywhere; }
+.measurement-result span { font-size: .68rem; }
+.measurement-instruction { margin: 5px 0 10px; color: #c0d1da; font-size: .68rem; line-height: 1.5; }
+.measurement-options { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.measurement-options label { display: flex; align-items: center; gap: 6px; color: #c0d1da; font-size: .66rem; }
+.measurement-options select { max-width: 90px; min-height: 32px; padding: 3px 6px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-2); color: var(--text); }
+.measurement-options input { width: 18px; height: 18px; margin: 0; accent-color: var(--accent); }
+.measurement-hint { margin: 8px 0 0; color: var(--accent-bright); font-size: .63rem; line-height: 1.45; }
+.measurement-actions { display: flex; align-items: center; justify-content: flex-end; gap: 7px; margin-top: 9px; }
+.measurement-feedback { margin-right: auto; color: var(--muted); font-size: .62rem; }
+.pdf-viewer { position: absolute; inset: 0; background: #0b1118; }
+.pdf-scroll { position: absolute; inset: 0; overflow: auto; padding: calc(92px + env(safe-area-inset-top)) 18px calc(156px + env(safe-area-inset-bottom)); overscroll-behavior: contain; touch-action: pan-x pan-y; }
+.pdf-page { display: block; margin: 0 auto; background: white; box-shadow: 0 8px 30px rgba(0,0,0,.3); }
+.pdf-pagination { position: absolute; bottom: calc(96px + env(safe-area-inset-bottom)); left: 50%; z-index: 2; transform: translateX(-50%); display: flex; align-items: center; justify-content: center; gap: 12px; padding: 7px 12px; max-width: calc(100% - 28px); border: 1px solid var(--line); border-radius: 12px; background: rgba(16,26,36,.96); white-space: nowrap; font-size: .72rem; }
+.pdf-pagination button { display: grid; place-items: center; min-width: 38px; min-height: 36px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); color: var(--text); cursor: pointer; }
+.pdf-zoom-label { color: var(--muted); font-size: .62rem; }
+.pdf-pagination label { display: flex; align-items: center; gap: 5px; }
+.pdf-pagination input { width: 3rem; min-height: 32px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-2); color: var(--text); text-align: center; }
+.pdf-pagination .pdf-rendering { top: auto; bottom: calc(100% + 8px); }
+.pdf-rendering { position: absolute; top: calc(88px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); z-index: 3; border-radius: 9px; padding: 8px 12px; background: rgba(16,26,36,.94); color: var(--accent-bright); font-size: .7rem; }
+.archive-dialog { max-width: 580px; }
+.archive-dialog > p { color: #bfced5; font-size: .76rem; line-height: 1.5; }
+.archive-entry-list { max-height: 38vh; overflow: auto; border: 1px solid var(--line); border-radius: 11px; }
+.archive-entry { display: flex; align-items: center; gap: 11px; min-height: 48px; padding: 9px 11px; border-bottom: 1px solid var(--line); }
+.archive-entry:last-child { border-bottom: 0; }
+.archive-entry input { width: 21px; height: 21px; flex: 0 0 auto; accent-color: var(--accent); }
+.archive-entry-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 4px; font-size: .72rem; overflow-wrap: anywhere; }
+.archive-entry-copy small { color: var(--muted); font-size: .62rem; }
+.archive-selection-actions { display: flex; gap: 8px; margin: 10px 0; }
+.archive-selection-actions button { min-height: 34px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); color: var(--text); font-size: .67rem; cursor: pointer; }
+.archive-status { color: var(--accent-bright); font-size: .72rem; line-height: 1.5; }
+.archive-unsupported { opacity: .55; }
+@media (min-width: 700px) and (min-height: 600px) { .measurement-panel { margin: 0; left: auto; width: 440px; right: 100px; bottom: calc(20px + env(safe-area-inset-bottom)); } .viewer-toolbar.with-measure { grid-template-columns: 64px; } }
 
 * {
   box-sizing: border-box;

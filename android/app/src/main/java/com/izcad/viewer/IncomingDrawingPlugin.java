@@ -279,7 +279,7 @@ public class IncomingDrawingPlugin extends Plugin {
             name = "drawing";
         }
 
-        if (!hasDrawingExtension(name)) {
+        if (!hasSupportedFileExtension(name)) {
             String inferredExtension = extensionForMimeType(mimeType);
             if (inferredExtension != null) {
                 name += inferredExtension;
@@ -300,9 +300,10 @@ public class IncomingDrawingPlugin extends Plugin {
         return name;
     }
 
-    private static boolean hasDrawingExtension(String name) {
+    private static boolean hasSupportedFileExtension(String name) {
         String lowerName = name.toLowerCase(Locale.ROOT);
-        return lowerName.endsWith(".dxf") || lowerName.endsWith(".dwg");
+        return lowerName.endsWith(".dxf") || lowerName.endsWith(".dwg") ||
+            lowerName.endsWith(".pdf") || lowerName.endsWith(".zip") || lowerName.endsWith(".rar");
     }
 
     @Nullable
@@ -311,7 +312,17 @@ public class IncomingDrawingPlugin extends Plugin {
             return null;
         }
 
-        String normalized = mimeType.toLowerCase(Locale.ROOT);
+        String normalized = mimeType.toLowerCase(Locale.ROOT).split(";", 2)[0].trim();
+        if (normalized.equals("application/pdf")) {
+            return ".pdf";
+        }
+        if (normalized.equals("application/zip") || normalized.equals("application/x-zip-compressed")) {
+            return ".zip";
+        }
+        if (normalized.equals("application/vnd.rar") || normalized.equals("application/x-rar-compressed") ||
+            normalized.equals("application/x-rar")) {
+            return ".rar";
+        }
         if (normalized.contains("dxf")) {
             return ".dxf";
         }

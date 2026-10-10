@@ -35,7 +35,7 @@ describe("incoming Android drawings", () => {
   it("rejects unsupported formats and remote URIs before reading", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    await expect(readIncomingDrawingFile({ ...drawing, name: "file.pdf" }))
+    await expect(readIncomingDrawingFile({ ...drawing, name: "file.txt" }))
       .rejects.toMatchObject({ code: "UNSUPPORTED_FORMAT" });
     await expect(readIncomingDrawingFile({ ...drawing, uri: "https://example.com/file.dxf" }))
       .rejects.toMatchObject({ code: "FILE_READ_FAILED" });
@@ -56,6 +56,13 @@ describe("incoming Android drawings", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(new Blob([]))));
     await expect(readIncomingDrawingFile(drawing))
       .rejects.toMatchObject({ code: "EMPTY_FILE" });
+  });
+
+  it.each(["pdf", "zip", "rar"])("accepts a local shared %s document", async (extension) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(new Blob(["document"]))));
+    const file = await readIncomingDrawingFile({ ...drawing, name: `document.${extension}` });
+    expect(file.name).toBe(`document.${extension}`);
+    expect(await file.text()).toBe("document");
   });
 
   it("does not return an incomplete shared file", async () => {

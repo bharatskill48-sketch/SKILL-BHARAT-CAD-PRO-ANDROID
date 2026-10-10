@@ -2,6 +2,10 @@ import type { SVGProps } from "react";
 
 type IconProps = SVGProps<SVGSVGElement>;
 
+export function MeasureIcon(props: IconProps) {
+  return <IconBase {...props}><path d="m3 16 13-13 5 5L8 21zM7 12l2 2M10 9l3 3M13 6l2 2M4 15l3 3" /></IconBase>;
+}
+
 function IconBase({ children, ...props }: IconProps) {
   return (
     <svg

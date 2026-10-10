@@ -5,13 +5,17 @@ import {
   ResetIcon,
   ZoomInIcon,
   ZoomOutIcon,
+  MeasureIcon,
 } from "./Icons";
 
 type Props = {
   onCommand(command: ViewerCommand): void;
+  canMeasure?: boolean;
+  measuring?: boolean;
+  onMeasure?(): void;
 };
 
-export function ViewerToolbar({ onCommand }: Props) {
+export function ViewerToolbar({ onCommand, canMeasure, measuring, onMeasure }: Props) {
   const { t } = useI18n();
   const buttons = [
     { command: "zoom-in" as const, label: t("zoomIn"), Icon: ZoomInIcon },
@@ -21,7 +25,7 @@ export function ViewerToolbar({ onCommand }: Props) {
   ];
 
   return (
-    <nav className="viewer-toolbar" aria-label={t("viewerControls")}>
+    <nav className={`viewer-toolbar ${canMeasure ? "with-measure" : ""}`} aria-label={t("viewerControls")}>
       {buttons.map(({ command, label, Icon }) => (
         <button
           key={command}
@@ -34,6 +38,7 @@ export function ViewerToolbar({ onCommand }: Props) {
           <span>{label}</span>
         </button>
       ))}
+      {canMeasure ? <button type="button" aria-pressed={!!measuring} aria-label={t("measure")} title={t("measure")} onClick={onMeasure}><MeasureIcon /><span>{t("measure")}</span></button> : null}
     </nav>
   );
 }

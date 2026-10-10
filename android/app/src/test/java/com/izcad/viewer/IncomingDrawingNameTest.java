@@ -29,6 +29,21 @@ public class IncomingDrawingNameTest {
     }
 
     @Test
+    public void infersPdfAndArchiveExtensionsFromFileManagerMimeTypes() {
+        assertEquals("drawing.pdf", IncomingDrawingPlugin.normalizeDrawingName(null, null, "application/pdf"));
+        assertEquals("plans.zip", IncomingDrawingPlugin.normalizeDrawingName("plans", null, "application/x-zip-compressed"));
+        assertEquals("plans.rar", IncomingDrawingPlugin.normalizeDrawingName("plans", null, "application/vnd.rar"));
+        assertEquals("plans.rar", IncomingDrawingPlugin.normalizeDrawingName("plans", null, "application/x-rar-compressed; charset=binary"));
+    }
+
+    @Test
+    public void preservesPdfAndArchiveExtensionsEvenWithMisleadingMimeTypes() {
+        assertEquals("Plans.PDF", IncomingDrawingPlugin.normalizeDrawingName("Plans.PDF", null, "image/vnd.dwg"));
+        assertEquals("Plans.ZIP", IncomingDrawingPlugin.normalizeDrawingName("Plans.ZIP", null, "application/pdf"));
+        assertEquals("Plans.RAR", IncomingDrawingPlugin.normalizeDrawingName("Plans.RAR", null, "application/zip"));
+    }
+
+    @Test
     public void boundsProviderNamesToTheLibraryLimitAfterExtensionInference() {
         String name = IncomingDrawingPlugin.normalizeDrawingName("x".repeat(1000) + ".dwg", null, null);
         assertEquals(220, name.length());

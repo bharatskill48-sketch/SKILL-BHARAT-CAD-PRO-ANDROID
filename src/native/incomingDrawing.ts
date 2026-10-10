@@ -5,7 +5,7 @@ import {
 } from "@capacitor/core";
 import {
   detectDrawingFormat,
-  MAX_DRAWING_FILE_BYTES,
+  fileSizeLimit,
   validateDrawingFileSize,
 } from "../files/fileTypes";
 import { AppError } from "../types/drawing";
@@ -49,10 +49,10 @@ interface IncomingDrawingPlugin {
 export const incomingDrawingPlugin =
   registerPlugin<IncomingDrawingPlugin>("IncomingDrawing");
 
-async function readLocalBlob(response: Response): Promise<Blob> {
+async function readLocalBlob(response: Response, limit: number): Promise<Blob> {
   const declaredSize = response.headers.get("content-length");
   if (declaredSize && /^\d+$/.test(declaredSize)) {
-    validateDrawingFileSize(Number(declaredSize));
+    validateDrawingFileSize(Number(declaredSize), limit);
   }
   if (!response.body) {
     return response.blob();
@@ -66,7 +66,7 @@ async function readLocalBlob(response: Response): Promise<Blob> {
       const { value, done } = await reader.read();
       if (done) { break; }
       size += value.byteLength;
-      if (size > MAX_DRAWING_FILE_BYTES) {
+      if (size > limit) {
         await reader.cancel().catch(() => undefined);
         throw new AppError("FILE_TOO_LARGE");
       }
@@ -82,7 +82,8 @@ export async function readIncomingDrawingFile(
   drawing: IncomingDrawing,
   signal?: AbortSignal,
 ): Promise<File> {
-  if (!detectDrawingFormat(drawing.name)) {
+  const format = detectDrawingFormat(drawing.name);
+  if (!format) {
     throw new AppError("UNSUPPORTED_FORMAT");
   }
   if (
@@ -94,7 +95,7 @@ export async function readIncomingDrawingFile(
   }
   // Android content providers may report -1 when the size is unknown.
   if (drawing.size >= 0) {
-    validateDrawingFileSize(drawing.size);
+    validateDrawingFileSize(drawing.size, fileSizeLimit(format));
   }
   const localUrl = Capacitor.convertFileSrc(drawing.uri);
   const response = await fetch(localUrl, { signal, cache: "no-store" });
@@ -103,8 +104,8 @@ export async function readIncomingDrawingFile(
       `Incoming drawing could not be read (${response.status}).`);
   }
 
-  const blob = await readLocalBlob(response);
-  validateDrawingFileSize(blob.size);
+  const blob = await readLocalBlob(response, fileSizeLimit(format));
+  validateDrawingFileSize(blob.size, fileSizeLimit(format));
   if (drawing.size > 0 && blob.size !== drawing.size) {
     throw new AppError("FILE_READ_FAILED", "Incoming drawing size changed while reading.");
   }

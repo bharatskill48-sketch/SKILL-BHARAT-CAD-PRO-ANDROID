@@ -44,7 +44,7 @@ describe("drawing library storage", () => {
   it("rejects empty or unsupported files without creating library entries", async () => {
     await expect(library.importDrawingToLibrary(new File([], "empty.dxf")))
       .rejects.toMatchObject({ code: "INVALID_FILE" });
-    await expect(library.importDrawingToLibrary(drawing("notes.pdf")))
+    await expect(library.importDrawingToLibrary(drawing("notes.txt")))
       .rejects.toMatchObject({ code: "INVALID_FILE" });
     expect(await library.listLibraryChildren("root")).toHaveLength(0);
   });
@@ -59,6 +59,57 @@ describe("drawing library storage", () => {
     expect(new Set(entries.map((entry) => entry.name)).size).toBe(3);
     const files = await Promise.all(entries.map((entry) => library.openLibraryDrawing(entry.id)));
     expect(await Promise.all(files.map((file) => file.text()))).toEqual(["one", "two", "three"]);
+  });
+
+  it.each(["pdf", "zip", "rar"])("stores and reopens original %s bytes", async (extension) => {
+    const file = new File([new Uint8Array([0, 1, 255, 45])], `document.${extension}`);
+    const entry = await library.importDrawingToLibrary(file);
+    expect(entry.format).toBe(extension);
+    expect(new Uint8Array(await (await library.openLibraryDrawing(entry.id)).arrayBuffer()))
+      .toEqual(new Uint8Array([0, 1, 255, 45]));
+  });
+
+  it("imports selected archive documents atomically while preserving nested folders", async () => {
+    const result = await library.importArchiveFilesToLibrary([
+      { path: "Floor 1/plan.dwg", file: drawing("plan.dwg", "dwg original") },
+      { path: "Floor 1/notes/spec.pdf", file: drawing("spec.pdf", "pdf original") },
+      { path: "Floor 2/plan.dxf", file: drawing("plan.dxf", "dxf original") },
+    ], "root", "Project");
+    expect(result.entries).toHaveLength(3);
+    const floor1 = (await library.listLibraryChildren(result.folder.id)).find((entry) => entry.name === "Floor 1")!;
+    expect(await library.getLibraryPath(result.entries[1].parentId))
+      .toMatchObject([{ name: "Project" }, { name: "Floor 1" }, { name: "notes" }]);
+    expect((await library.listLibraryChildren(floor1.id)).map((entry) => entry.name))
+      .toEqual(["notes", "plan.dwg"]);
+    expect(await (await library.openLibraryDrawing(result.entries[1].id)).text()).toBe("pdf original");
+    expect((await library.listRecentDrawings()).map((entry) => entry.id)).toEqual([result.entries[1].id]);
+  });
+
+  it("rejects archive traversal and already cancelled imports before creating folders", async () => {
+    await expect(library.importArchiveFilesToLibrary([
+      { path: "../plan.dwg", file: drawing("plan.dwg") },
+    ], "root", "Project")).rejects.toMatchObject({ code: "INVALID_PATH" });
+    const controller = new AbortController();
+    controller.abort();
+    await expect(library.importArchiveFilesToLibrary([
+      { path: "plan.dwg", file: drawing("plan.dwg") },
+    ], "root", "Project", controller.signal)).rejects.toMatchObject({ name: "AbortError" });
+    expect(await library.listLibraryChildren("root")).toHaveLength(0);
+  });
+
+  it("rolls back the complete archive tree if saving a document exceeds quota", async () => {
+    await library.listLibraryChildren("root");
+    const originalAdd = IDBObjectStore.prototype.add;
+    vi.spyOn(IDBObjectStore.prototype, "add").mockImplementation(function (
+      this: IDBObjectStore, value: unknown, key?: IDBValidKey,
+    ) {
+      if (this.name === "contents") throw new DOMException("Storage quota exceeded", "QuotaExceededError");
+      return originalAdd.call(this, value, key);
+    });
+    await expect(library.importArchiveFilesToLibrary([
+      { path: "nested/spec.pdf", file: drawing("spec.pdf") },
+    ], "root", "Project")).rejects.toMatchObject({ code: "STORAGE_FULL" });
+    expect(await library.listLibraryChildren("root")).toHaveLength(0);
   });
 
   it("checks folder name collisions inside the write transaction", async () => {

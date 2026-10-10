@@ -84,4 +84,31 @@ describe("saved drawing view", () => {
     expect(resolveSavedDrawingView(view, bounds, { x: NaN, y: 0 }, 1)).toBeNull();
     expect(resolveSavedDrawingView({ ...view, aspectRatio: Number.MAX_VALUE }, bounds, { x: 0, y: 0 }, 1)).toBeNull();
   });
+
+  it("falls back to fitting content when the saved desktop view is vastly zoomed out", () => {
+    expect(resolveSavedDrawingView(
+      { center: { x: 50, y: 50 }, viewHeight: 20_000, aspectRatio: 2.5 },
+      bounds,
+      { x: 0, y: 0 },
+      0.5,
+    )).toBeNull();
+  });
+
+  it("preserves a saved view with ordinary surrounding context", () => {
+    expect(resolveSavedDrawingView(
+      { center: { x: 50, y: 50 }, viewHeight: 100, aspectRatio: 2.5 },
+      bounds,
+      { x: 0, y: 0 },
+      0.5,
+    )).toEqual({ center: { x: 50, y: 50 }, width: 250 });
+  });
+
+  it("compares an oversized saved view with the whole drawing on a wide canvas", () => {
+    expect(resolveSavedDrawingView(
+      { center: { x: 50, y: 50 }, viewHeight: 1_000 },
+      bounds,
+      { x: 0, y: 0 },
+      2,
+    )).toBeNull();
+  });
 });

@@ -23,6 +23,7 @@ export type ResolvedDrawingView = {
 };
 
 const savedViews = new WeakMap<File, SavedDrawingView>();
+const MAX_SAVED_VIEW_FIT_RATIO = 4;
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
@@ -133,6 +134,21 @@ export function resolveSavedDrawingView(
     viewMinY <= bounds.maxY;
 
   if (!intersectsDrawing) {
+    return null;
+  }
+
+  const drawingWidth = bounds.maxX - bounds.minX;
+  const drawingHeight = bounds.maxY - bounds.minY;
+  const fitWidth = Math.max(drawingWidth, drawingHeight * viewportAspect);
+  // A valid desktop viewport may include a little context or focus on one
+  // sheet. A viewport several times larger than all visible geometry instead
+  // leaves the drawing as a tiny dot, especially after adapting it to a phone.
+  // Let the content fit take over in that case without changing useful views.
+  if (
+    Number.isFinite(fitWidth) &&
+    fitWidth > 0 &&
+    width / fitWidth > MAX_SAVED_VIEW_FIT_RATIO
+  ) {
     return null;
   }
 

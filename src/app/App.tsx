@@ -15,10 +15,13 @@ import { CloseIcon, FolderIcon, ShieldIcon } from "../components/Icons";
 import { LanguageSwitch } from "../components/LanguageSwitch";
 import { LoadingScreen } from "../components/LoadingScreen";
 import { ViewerToolbar } from "../components/ViewerToolbar";
+import { MeasurementPanel } from "../components/MeasurementPanel";
+import type { MeasurementPick } from "../viewer/DrawingViewer";
+import type { MeasurementGeometry, MeasurementSettings, MeasurementUnit } from "../viewer/measurementGeometry";
 import { dispatchBackNavigation, useBackNavigation } from "./backNavigation";
 import { version } from "../../package.json";
 import { convertDwgToDxf } from "../dwg/convertDwg";
-import { toDrawingFile } from "../files/fileTypes";
+import { isArchiveFormat, toDrawingFile } from "../files/fileTypes";
 import { useI18n } from "../i18n/I18nProvider";
 import {
   importDrawingToLibrary,
@@ -43,6 +46,8 @@ const DrawingCanvas = lazy(() =>
     default: module.DrawingCanvas,
   })),
 );
+const PdfViewer = lazy(() => import("../components/PdfViewer").then((module) => ({ default: module.PdfViewer })));
+const emptyMeasurement: MeasurementSettings = { enabled: false, mode: "distance", points: [], snapping: true, entity: null };
 
 type AppState =
   | { status: "home" }
@@ -90,6 +95,12 @@ export function App() {
   const [state, setState] = useState<AppState>({ status: "home" });
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [libraryNotice, setLibraryNotice] = useState(false);
+  const [incomingArchive, setIncomingArchive] = useState<File | null>(null);
+  const [measurement, setMeasurement] = useState<MeasurementSettings>(emptyMeasurement);
+  const [measurementGeometry, setMeasurementGeometry] = useState<MeasurementGeometry | null>(null);
+  const [sourceUnit, setSourceUnit] = useState<MeasurementUnit>("drawing");
+  const [displayUnit, setDisplayUnit] = useState<MeasurementUnit>("drawing");
+  const [measurementFeedback, setMeasurementFeedback] = useState<string | null>(null);
   const viewerRef = useRef<ViewerHandle>(null);
   const requestIdRef = useRef(0);
   const incomingRequestIdRef = useRef(0);
@@ -108,6 +119,10 @@ export function App() {
     lastDrawingRef.current = null;
     pendingImportRef.current = null;
     setLibraryNotice(false);
+    setMeasurement(emptyMeasurement);
+    setMeasurementGeometry(null);
+    setMeasurementFeedback(null);
+    setIncomingArchive(null);
 
     let drawing: DrawingFile;
     try {
@@ -121,6 +136,12 @@ export function App() {
     }
 
     lastDrawingRef.current = { file, libraryEntryId };
+    if (isArchiveFormat(drawing.format)) {
+      setIncomingArchive(file);
+      setState({ status: "home" });
+      setLibraryOpen(true);
+      return;
+    }
     if (!libraryEntryId) pendingImportRef.current = { file, requestId };
     setLibraryOpen(false);
     setState({
@@ -320,18 +341,22 @@ export function App() {
     pendingImportRef.current = null;
     lastDrawingRef.current = null;
     setLibraryNotice(false);
+    setMeasurement(emptyMeasurement);
+    setIncomingArchive(null);
     setState({ status: "home" });
   }, []);
 
   const handleBack = useCallback(() => {
     if (libraryOpen) {
       setLibraryOpen(false);
+    } else if (measurement.enabled) {
+      setMeasurement((current) => ({ ...current, enabled: false }));
     } else if (state.status !== "home") {
       closeDrawing();
     } else if (Capacitor.isNativePlatform()) {
       void incomingDrawingPlugin.exitApp().catch(() => undefined);
     }
-  }, [closeDrawing, libraryOpen, state.status]);
+  }, [closeDrawing, libraryOpen, state.status, measurement.enabled]);
   useBackNavigation(handleBack);
 
   useEffect(() => {
@@ -366,12 +391,36 @@ export function App() {
     viewerRef.current?.execute(command);
   }, []);
 
+  const handleMeasurementReady = useCallback((geometry: MeasurementGeometry) => {
+    setMeasurementGeometry(geometry);
+    setSourceUnit(geometry.units);
+    setDisplayUnit(geometry.units);
+  }, []);
+  const handleMeasurementPick = useCallback((pick: MeasurementPick) => {
+    setMeasurement((current) => {
+      if (!current.enabled) return current;
+      if (current.mode === "object") return { ...current, entity: pick.entity, points: [] };
+      const limit = current.mode === "distance" ? 2 : current.mode === "angle" ? 3 : 256;
+      const points = current.points.length >= limit && limit <= 3 ? [] : current.points;
+      if (points.length >= limit) return current;
+      return { ...current, points: [...points, pick.point], entity: null };
+    });
+    setMeasurementFeedback(pick.entity ? null : measurement.mode === "object" ? t("measureNoObject") : pick.snapped ? t(({ endpoint: "measureEndpoint", midpoint: "measureMidpoint", center: "measureCenter" } as const)[pick.snapped]) : null);
+  }, [measurement.mode, t]);
+
   const canvasRequestId = requestIdRef.current;
   const canvas =
     (state.status === "loading" && state.renderFile) ||
     state.status === "viewer" ? (
       <Suspense fallback={null}>
-        <DrawingCanvas
+        {state.drawing.format === "pdf" ? <PdfViewer
+          ref={viewerRef}
+          key={requestIdRef.current}
+          file={state.renderFile!}
+          onProgress={(phase, processed, total) => { if (canvasRequestId === requestIdRef.current) handleProgress(phase, processed, total); }}
+          onReady={() => { if (canvasRequestId === requestIdRef.current) handleViewerReady(); }}
+          onError={(error) => { if (canvasRequestId === requestIdRef.current) handleViewerError(error); }}
+        /> : <DrawingCanvas
           ref={viewerRef}
           key={requestIdRef.current}
           file={
@@ -386,7 +435,10 @@ export function App() {
           onError={(error) => {
             if (canvasRequestId === requestIdRef.current) handleViewerError(error);
           }}
-        />
+          measurement={measurement}
+          onMeasurementReady={handleMeasurementReady}
+          onMeasurementPick={handleMeasurementPick}
+        />}
       </Suspense>
     ) : null;
 
@@ -530,7 +582,14 @@ export function App() {
         </div>
       </header>
 
-      <ViewerToolbar onCommand={sendCommand} />
+      <ViewerToolbar onCommand={sendCommand}
+        canMeasure={state.drawing.format !== "pdf"}
+        measuring={measurement.enabled}
+        onMeasure={() => setMeasurement((current) => ({ ...current, enabled: !current.enabled }))} />
+      {measurement.enabled && state.drawing.format !== "pdf" ? <MeasurementPanel settings={measurement} geometry={measurementGeometry}
+        sourceUnit={sourceUnit} displayUnit={displayUnit} feedback={measurementFeedback}
+        onSettings={(settings) => { setMeasurement(settings); setMeasurementFeedback(null); }}
+        onSourceUnit={(unit) => { setSourceUnit(unit); setDisplayUnit(unit); }} onDisplayUnit={setDisplayUnit} /> : null}
       {libraryNotice ? <div className="library-notice" role="status">{t("librarySaveFailed")}</div> : null}
     </>
     );
@@ -542,7 +601,8 @@ export function App() {
       <div className="app-content" hidden={libraryOpen}>{content}</div>
       {libraryOpen ? (
         <div className="library-overlay">
-          <DrawingLibrary onClose={() => setLibraryOpen(false)} onOpen={openFile} />
+          <DrawingLibrary onClose={() => { setLibraryOpen(false); setIncomingArchive(null); }} onOpen={openFile}
+            incomingArchive={incomingArchive} onIncomingArchiveHandled={() => setIncomingArchive(null)} />
         </div>
       ) : null}
     </div>

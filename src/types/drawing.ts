@@ -1,4 +1,4 @@
-export type DrawingFormat = "dxf" | "dwg";
+export type DrawingFormat = "dxf" | "dwg" | "pdf" | "zip" | "rar";
 
 export type DrawingFile = {
   file: File;
@@ -26,6 +26,9 @@ export type AppErrorCode =
   | "EMPTY_FILE"
   | "FILE_TOO_LARGE"
   | "FILE_READ_FAILED"
+  | "PDF_OPEN_FAILED"
+  | "PDF_PASSWORD_REQUIRED"
+  | "ARCHIVE_OPEN_FAILED"
   | "DXF_OPEN_FAILED"
   | "DWG_CONVERSION_FAILED"
   | "DWG_UNSUPPORTED_VERSION"

@@ -1,6 +1,7 @@
 # izCAD Gizlilik Politikası / Privacy Policy
 
 Yürürlük tarihi / Effective date: 27 Temmuz 2026 / 27 July 2026
+Son güncelleme / Last updated: 10 Ekim 2026 / 10 October 2026
 
 Yayımlanan politika / Published policy:
 https://sites.google.com/view/izcad-gp-pp/ana-sayfa
@@ -21,19 +22,23 @@ satmaz ve üçüncü taraflarla paylaşmaz. Uygulama:
 - Konum, kişiler, kamera, mikrofon veya cihaz tanımlayıcılarına erişmez.
 - İnternet izni istemez.
 
-### Çizim dosyaları
+### Çizim, PDF ve arşiv dosyaları
 
-Kullanıcı DXF veya DWG dosyasını Android sistem dosya seçicisi üzerinden
-kendisi seçer. Seçilen çizim cihaz üzerinde ve çevrimdışı işlenir. Dosya
+Kullanıcı DXF, DWG, PDF, ZIP veya RAR dosyasını Android sistem dosya seçicisi
+üzerinden kendisi seçer. Seçilen dosya cihaz üzerinde ve çevrimdışı işlenir. Dosya
 içeriği geliştiriciye veya üçüncü taraf bir sunucuya gönderilmez. izCAD
 çizimleri bir bulut hesabına yüklemez ve kendi sunucusunda saklamaz.
 
-Kullanıcının açtığı çizimlerin bir kopyası, daha sonra hızlı erişim sağlamak
+Kullanıcının eklediği dosyaların bir kopyası, daha sonra hızlı erişim sağlamak
 amacıyla izCAD'in cihazdaki uygulamaya özel Çizim Kitaplığı alanında
 saklanabilir. Kullanıcı bu yerel kopyaları uygulama içinde klasörlere ayırabilir,
 kopyalayabilir, taşıyabilir, yeniden adlandırabilir veya silebilir. Bu işlemler
 yalnızca cihazda gerçekleştirilir. Kitaplıktaki dosyalar uygulama verileri
 temizlendiğinde veya uygulama kaldırıldığında Android tarafından silinir.
+
+Arşivden çıkarılacak desteklenen çizim/PDF dosyalarını kullanıcı seçer.
+Çıkarılan dosyalar da aynı yerel kitaplıkta saklanır. CAD ölçümleri geçicidir;
+sunucuya gönderilmez ve özgün çizim dosyasını değiştirmez.
 
 Android'in sistem dosya seçicisi veya kullanıcının seçtiği harici dosya
 sağlayıcısı kendi koşullarına ve gizlilik politikasına tabi olabilir.
@@ -79,20 +84,24 @@ application:
   identifiers.
 - Does not request Internet permission.
 
-### Drawing files
+### Drawing, PDF and archive files
 
-The user explicitly selects a DXF or DWG file through Android's system file
-picker. The selected drawing is processed locally and offline on the device.
+The user explicitly selects a DXF, DWG, PDF, ZIP or RAR file through Android's
+system file picker. The selected file is processed locally and offline on the device.
 Its contents are not transmitted to the developer or any third-party server.
 izCAD does not upload drawings to a cloud account or store them on its own
 servers.
 
-A copy of a drawing opened by the user may be stored in izCAD's app-private
+A copy of a file added by the user may be stored in izCAD's app-private
 Drawing Library on the device for faster later access. The user can organize,
 copy, move, rename, or delete these local copies inside the application. All
 such operations take place only on the device. Library files are removed by
 Android when the user clears the application's data or uninstalls the
 application.
+
+The user selects the supported CAD/PDF files to extract from an archive.
+Extracted files are stored in the same local library. CAD measurements are
+temporary, are not transmitted to a server and do not modify the original drawing.
 
 Android's system file picker or an external document provider selected by the
 user may be governed by that provider's own terms and privacy policy.

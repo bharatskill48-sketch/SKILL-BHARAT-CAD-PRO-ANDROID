@@ -1,13 +1,26 @@
 import type { DrawingFile, DrawingFormat } from "../types/drawing";
 import { AppError } from "../types/drawing";
 
-const SUPPORTED_EXTENSIONS = new Set<DrawingFormat>(["dxf", "dwg"]);
+const SUPPORTED_EXTENSIONS = new Set<DrawingFormat>(["dxf", "dwg", "pdf", "zip", "rar"]);
 
 // Parsing and geometry can require several times the source file's memory.
 export const MAX_DRAWING_FILE_BYTES = 128 * 1024 * 1024;
+export const MAX_ARCHIVE_FILE_BYTES = 64 * 1024 * 1024;
 
 export const DRAWING_FILE_ACCEPT =
-  ".dxf,.dwg,application/dxf,application/acad,application/x-acad,application/autocad_dwg,image/vnd.dwg,application/octet-stream";
+  ".dxf,.dwg,.pdf,.zip,.rar,application/dxf,application/acad,application/x-acad,application/autocad_dwg,image/vnd.dwg,application/pdf,application/zip,application/x-zip-compressed,application/vnd.rar,application/x-rar-compressed,application/octet-stream";
+
+export function isCadFormat(format: DrawingFormat): format is "dxf" | "dwg" {
+  return format === "dxf" || format === "dwg";
+}
+
+export function isArchiveFormat(format: DrawingFormat): format is "zip" | "rar" {
+  return format === "zip" || format === "rar";
+}
+
+export function fileSizeLimit(format: DrawingFormat): number {
+  return isArchiveFormat(format) ? MAX_ARCHIVE_FILE_BYTES : MAX_DRAWING_FILE_BYTES;
+}
 
 export function getFileExtension(fileName: string): string {
   const name = fileName.trim();
@@ -32,7 +45,7 @@ export function toDrawingFile(file: File): DrawingFile {
     throw new AppError("UNSUPPORTED_FORMAT");
   }
 
-  validateDrawingFileSize(file.size);
+  validateDrawingFileSize(file.size, fileSizeLimit(format));
 
   return {
     file,
@@ -42,14 +55,14 @@ export function toDrawingFile(file: File): DrawingFile {
   };
 }
 
-export function validateDrawingFileSize(size: number): void {
+export function validateDrawingFileSize(size: number, limit = MAX_DRAWING_FILE_BYTES): void {
   if (!Number.isSafeInteger(size) || size < 0) {
     throw new AppError("FILE_READ_FAILED");
   }
   if (size === 0) {
     throw new AppError("EMPTY_FILE");
   }
-  if (size > MAX_DRAWING_FILE_BYTES) {
+  if (size > limit) {
     throw new AppError("FILE_TOO_LARGE");
   }
 }

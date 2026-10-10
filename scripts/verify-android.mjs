@@ -106,11 +106,24 @@ const requiredPackagedNotices = [
   "LICENSE",
   "LICENSE-APACHE-2.0.txt",
   "LICENSE-MPL-2.0.txt",
+  "LICENSE-FFLATE-MIT.txt",
+  "LICENSE-PDFJS-THIRD-PARTY.txt",
+  "LICENSE-LIBARCHIVE-WASM-MIT.txt",
+  "LICENSE-LIBARCHIVE.txt",
+  "LICENSE-LIBARCHIVE-SOURCE-NOTICES.txt",
+  "LICENSE-OPENSSL-3.txt",
+  "LICENSE-ZLIB.txt",
+  "LICENSE-BZIP2.txt",
+  "LICENSE-XZ-0BSD.txt",
+  "LICENSE-EMSCRIPTEN.txt",
+  "LICENSE-MUSL.txt",
+  "LICENSE-LLVM.txt",
+  "NOTICE-ARCHIVE-RUNTIME.md",
   "NOTICE.md",
   "THIRD_PARTY_LICENSES.md",
 ];
 
-const [variables, manifest, strings, mainActivity, incomingDrawingPlugin, appGradle, capacitorConfig, packageJson, filePaths] =
+const [variables, manifest, strings, mainActivity, incomingDrawingPlugin, appGradle, capacitorConfig, packageJson, filePaths, styles] =
   await Promise.all([
     readFile(variablesPath, "utf8"),
     readFile(manifestPath, "utf8"),
@@ -121,6 +134,7 @@ const [variables, manifest, strings, mainActivity, incomingDrawingPlugin, appGra
     readFile(resolve("android", "app", "src", "main", "assets", "capacitor.config.json"), "utf8").then(JSON.parse),
     readFile(resolve("package.json"), "utf8").then(JSON.parse),
     readFile(resolve("android", "app", "src", "main", "res", "xml", "file_paths.xml"), "utf8"),
+    readFile(resolve("android", "app", "src", "main", "res", "values", "styles.xml"), "utf8"),
   ]);
 
 check(
@@ -178,6 +192,17 @@ check(
   "Release uses bundled local assets, disables WebView debugging and mixed content, and is not debuggable.",
 );
 check(
+  "Readable system bars on the dark interface",
+  capacitorConfig.plugins?.SystemBars?.style === "DARK" &&
+    capacitorConfig.plugins?.SystemBars?.hidden === false &&
+    capacitorConfig.plugins?.SystemBars?.insetsHandling === "css" &&
+    /setAppearanceLightStatusBars\(false\)/.test(mainActivity) &&
+    /setAppearanceLightNavigationBars\(false\)/.test(mainActivity) &&
+    /name="android:windowLightStatusBar">false/.test(styles) &&
+    /name="android:statusBarColor">@android:color\/transparent/.test(styles),
+  "Use transparent system bars with light icons in both phone themes, and retain CSS safe-area handling.",
+);
+check(
   "Cleartext traffic disabled",
   /android:usesCleartextTraffic="false"/.test(manifest),
   "Android cleartext traffic must remain disabled.",
@@ -198,8 +223,11 @@ check(
   /android\.intent\.action\.VIEW/.test(manifest) &&
     /android\.intent\.category\.DEFAULT/.test(manifest) &&
     /android:mimeType="image\/vnd\.dwg"/.test(manifest) &&
-    /android:mimeType="application\/dxf"/.test(manifest),
-  "The main activity must advertise DXF and DWG ACTION_VIEW support.",
+    /android:mimeType="application\/dxf"/.test(manifest) &&
+    /android:mimeType="application\/pdf"/.test(manifest) &&
+    /android:mimeType="application\/zip"/.test(manifest) &&
+    /android:mimeType="application\/vnd\.rar"/.test(manifest),
+  "The main activity must advertise CAD, PDF, ZIP and RAR ACTION_VIEW support.",
 );
 
 const distRoot = resolve("dist");
