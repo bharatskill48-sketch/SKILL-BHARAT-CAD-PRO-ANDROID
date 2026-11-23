@@ -17,7 +17,11 @@ import { LoadingScreen } from "../components/LoadingScreen";
 import { ViewerToolbar } from "../components/ViewerToolbar";
 import { MeasurementPanel } from "../components/MeasurementPanel";
 import type { MeasurementPick } from "../viewer/DrawingViewer";
-import type { MeasurementGeometry, MeasurementSettings, MeasurementUnit } from "../viewer/measurementGeometry";
+import type {
+  MeasurementGeometry,
+  MeasurementSettings,
+  MeasurementUnit,
+} from "../viewer/measurementGeometry";
 import { dispatchBackNavigation, useBackNavigation } from "./backNavigation";
 import { version } from "../../package.json";
 import { convertDwgToDxf } from "../dwg/convertDwg";
@@ -46,8 +50,20 @@ const DrawingCanvas = lazy(() =>
     default: module.DrawingCanvas,
   })),
 );
-const PdfViewer = lazy(() => import("../components/PdfViewer").then((module) => ({ default: module.PdfViewer })));
-const emptyMeasurement: MeasurementSettings = { enabled: false, mode: "distance", points: [], snapping: true, entity: null };
+
+const PdfViewer = lazy(() =>
+  import("../components/PdfViewer").then((module) => ({
+    default: module.PdfViewer,
+  })),
+);
+
+const emptyMeasurement: MeasurementSettings = {
+  enabled: false,
+  mode: "distance",
+  points: [],
+  snapping: true,
+  entity: null,
+};
 
 type AppState =
   | { status: "home" }
@@ -71,8 +87,12 @@ function formatBytes(bytes: number, locale: string): string {
     Math.floor(Math.log(bytes) / Math.log(1024)),
     units.length,
   );
+
   const value = bytes / 1024 ** exponent;
-  return `${new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(value)} ${units[exponent - 1]}`;
+
+  return `${new Intl.NumberFormat(locale, {
+    maximumFractionDigits: 1,
+  }).format(value)} ${units[exponent - 1]}`;
 }
 
 function toAppError(error: unknown, fallback: AppErrorCode): AppError {
@@ -87,108 +107,149 @@ function openExternalLink(event: MouseEvent<HTMLAnchorElement>): void {
   }
 
   event.preventDefault();
-  void Browser.open({ url: event.currentTarget.href }).catch(() => undefined);
+
+  void Browser.open({
+    url: event.currentTarget.href,
+  }).catch(() => undefined);
 }
 
 export function App() {
   const { locale, t } = useI18n();
-  const [state, setState] = useState<AppState>({ status: "home" });
+
+  const [state, setState] = useState<AppState>({
+    status: "home",
+  });
+
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [libraryNotice, setLibraryNotice] = useState(false);
   const [incomingArchive, setIncomingArchive] = useState<File | null>(null);
-  const [measurement, setMeasurement] = useState<MeasurementSettings>(emptyMeasurement);
-  const [measurementGeometry, setMeasurementGeometry] = useState<MeasurementGeometry | null>(null);
-  const [sourceUnit, setSourceUnit] = useState<MeasurementUnit>("drawing");
-  const [displayUnit, setDisplayUnit] = useState<MeasurementUnit>("drawing");
-  const [measurementFeedback, setMeasurementFeedback] = useState<string | null>(null);
+
+  const [measurement, setMeasurement] =
+    useState<MeasurementSettings>(emptyMeasurement);
+
+  const [measurementGeometry, setMeasurementGeometry] =
+    useState<MeasurementGeometry | null>(null);
+
+  const [sourceUnit, setSourceUnit] =
+    useState<MeasurementUnit>("drawing");
+
+  const [displayUnit, setDisplayUnit] =
+    useState<MeasurementUnit>("drawing");
+
+  const [measurementFeedback, setMeasurementFeedback] =
+    useState<string | null>(null);
+
   const viewerRef = useRef<ViewerHandle>(null);
   const requestIdRef = useRef(0);
   const incomingRequestIdRef = useRef(0);
+
   const handledIncomingIdsRef = useRef(new Set<string>());
+
   const conversionAbortRef = useRef<AbortController | null>(null);
   const incomingAbortRef = useRef<AbortController | null>(null);
-  const lastDrawingRef = useRef<{ file: File; libraryEntryId?: string } | null>(null);
-  const pendingImportRef = useRef<{ file: File; requestId: number } | null>(null);
 
-  const openFile = useCallback(async (file: File, libraryEntryId?: string) => {
-    incomingRequestIdRef.current += 1;
-    incomingAbortRef.current?.abort();
-    conversionAbortRef.current?.abort();
-    conversionAbortRef.current = null;
-    const requestId = ++requestIdRef.current;
-    lastDrawingRef.current = null;
-    pendingImportRef.current = null;
-    setLibraryNotice(false);
-    setMeasurement(emptyMeasurement);
-    setMeasurementGeometry(null);
-    setMeasurementFeedback(null);
-    setIncomingArchive(null);
+  const lastDrawingRef = useRef<{
+    file: File;
+    libraryEntryId?: string;
+  } | null>(null);
 
-    let drawing: DrawingFile;
-    try {
-      drawing = toDrawingFile(file);
-    } catch (error) {
-      setState({
-        status: "error",
-        error: toAppError(error, "UNSUPPORTED_FORMAT"),
-      });
-      return;
-    }
+  const pendingImportRef = useRef<{
+    file: File;
+    requestId: number;
+  } | null>(null);
 
-    lastDrawingRef.current = { file, libraryEntryId };
-    if (isArchiveFormat(drawing.format)) {
-      setIncomingArchive(file);
-      setState({ status: "home" });
-      setLibraryOpen(true);
-      return;
-    }
-    if (!libraryEntryId) pendingImportRef.current = { file, requestId };
-    setLibraryOpen(false);
-    setState({
-      status: "loading",
-      drawing,
-      renderFile: null,
-      phase: drawing.format === "dwg" ? "converting" : "reading",
-      progress: null,
-    });
+  const openFile = useCallback(
+    async (file: File, libraryEntryId?: string) => {
+      incomingRequestIdRef.current += 1;
 
-    const conversionController =
-      drawing.format === "dwg" ? new AbortController() : null;
-    conversionAbortRef.current = conversionController;
+      incomingAbortRef.current?.abort();
+      conversionAbortRef.current?.abort();
+      conversionAbortRef.current = null;
 
-    try {
-      const renderFile =
-        drawing.format === "dwg"
-          ? await convertDwgToDxf(
-              file,
-              conversionController?.signal,
-            )
-          : file;
-      if (requestId !== requestIdRef.current) {
+      const requestId = ++requestIdRef.current;
+
+      lastDrawingRef.current = null;
+      pendingImportRef.current = null;
+
+      setLibraryNotice(false);
+      setMeasurement(emptyMeasurement);
+      setMeasurementGeometry(null);
+      setMeasurementFeedback(null);
+      setIncomingArchive(null);
+
+      let drawing: DrawingFile;
+
+      try {
+        drawing = toDrawingFile(file);
+      } catch (error) {
+        setState({
+          status: "error",
+          error: toAppError(error, "UNSUPPORTED_FORMAT"),
+        });
         return;
       }
+
+      lastDrawingRef.current = { file, libraryEntryId };
+
+      if (isArchiveFormat(drawing.format)) {
+        setIncomingArchive(file);
+        setState({ status: "home" });
+        setLibraryOpen(true);
+        return;
+      }
+
+      if (!libraryEntryId) {
+        pendingImportRef.current = { file, requestId };
+      }
+
+      setLibraryOpen(false);
 
       setState({
         status: "loading",
         drawing,
-        renderFile,
-        phase: "fetch",
+        renderFile: null,
+        phase: drawing.format === "dwg" ? "converting" : "reading",
         progress: null,
       });
-    } catch (error) {
-      if (requestId === requestIdRef.current) {
-        setState({
-          status: "error",
-          error: toAppError(error, "DWG_CONVERSION_FAILED"),
-        });
-      }
-    } finally {
-      if (conversionAbortRef.current === conversionController) {
-        conversionAbortRef.current = null;
-      }
-    }
-  }, []);
 
+      const conversionController =
+        drawing.format === "dwg" ? new AbortController() : null;
+
+      conversionAbortRef.current = conversionController;
+
+      try {
+        const renderFile =
+          drawing.format === "dwg"
+            ? await convertDwgToDxf(file, conversionController?.signal)
+            : file;
+
+        if (requestId !== requestIdRef.current) {
+          return;
+        }
+
+        setState({
+          status: "loading",
+          drawing,
+          renderFile,
+          phase: "fetch",
+          progress: null,
+        });
+      } catch (error) {
+        if (requestId === requestIdRef.current) {
+          setState({
+            status: "error",
+            error: toAppError(error, "DWG_CONVERSION_FAILED"),
+          });
+        }
+      } finally {
+        if (conversionAbortRef.current === conversionController) {
+          conversionAbortRef.current = null;
+        }
+      }
+    },
+    [],
+  );
+  
   const openIncomingDrawing = useCallback(
     async (incoming: IncomingDrawing) => {
       if (handledIncomingIdsRef.current.has(incoming.id)) {
@@ -196,15 +257,21 @@ export function App() {
       }
 
       handledIncomingIdsRef.current.add(incoming.id);
-      // Only retain a bounded deduplication history during long sessions.
+
       if (handledIncomingIdsRef.current.size > 100) {
-        handledIncomingIdsRef.current.delete(handledIncomingIdsRef.current.values().next().value!);
+        handledIncomingIdsRef.current.delete(
+          handledIncomingIdsRef.current.values().next().value!,
+        );
       }
+
       incomingAbortRef.current?.abort();
+
       const controller = new AbortController();
       incomingAbortRef.current = controller;
+
       const incomingRequestId = ++incomingRequestIdRef.current;
       const appRequestId = requestIdRef.current;
+
       let file: File;
 
       try {
@@ -220,6 +287,7 @@ export function App() {
           pendingImportRef.current = null;
           lastDrawingRef.current = null;
           setLibraryOpen(false);
+
           setState({
             status: "error",
             error: toAppError(error, "FILE_READ_FAILED"),
@@ -227,7 +295,10 @@ export function App() {
         }
         return;
       } finally {
-        if (incomingAbortRef.current === controller) incomingAbortRef.current = null;
+        if (incomingAbortRef.current === controller) {
+          incomingAbortRef.current = null;
+        }
+
         void incomingDrawingPlugin
           .acknowledgeDrawing({ id: incoming.id })
           .catch(() => undefined);
@@ -267,6 +338,7 @@ export function App() {
       }
 
       const { drawing } = await incomingDrawingPlugin.getPendingDrawing();
+
       if (drawing && !disposed) {
         await openIncomingDrawing(drawing);
       }
@@ -296,7 +368,8 @@ export function App() {
           phase,
           progress:
             total > 0 && Number.isFinite(processed) && Number.isFinite(total)
-              ? Math.min(1, Math.max(0, processed / total)) : null,
+              ? Math.min(1, Math.max(0, processed / total))
+              : null,
         };
       });
     },
@@ -306,15 +379,20 @@ export function App() {
   const handleViewerReady = useCallback(() => {
     const pending = pendingImportRef.current;
     pendingImportRef.current = null;
+
     if (pending && pending.requestId === requestIdRef.current) {
       void importDrawingToLibrary(pending.file, ROOT_FOLDER_ID).catch(() => {
-        if (pending.requestId === requestIdRef.current) setLibraryNotice(true);
+        if (pending.requestId === requestIdRef.current) {
+          setLibraryNotice(true);
+        }
       });
     }
+
     setState((current) => {
       if (current.status !== "loading" || !current.renderFile) {
         return current;
       }
+
       return {
         status: "viewer",
         drawing: current.drawing,
@@ -325,6 +403,7 @@ export function App() {
 
   const handleViewerError = useCallback((error: unknown) => {
     pendingImportRef.current = null;
+
     setState({
       status: "error",
       error: toAppError(error, "DXF_OPEN_FAILED"),
@@ -334,12 +413,16 @@ export function App() {
   const closeDrawing = useCallback(() => {
     incomingRequestIdRef.current += 1;
     requestIdRef.current += 1;
+
     conversionAbortRef.current?.abort();
     conversionAbortRef.current = null;
+
     incomingAbortRef.current?.abort();
     incomingAbortRef.current = null;
+
     pendingImportRef.current = null;
     lastDrawingRef.current = null;
+
     setLibraryNotice(false);
     setMeasurement(emptyMeasurement);
     setIncomingArchive(null);
@@ -350,38 +433,53 @@ export function App() {
     if (libraryOpen) {
       setLibraryOpen(false);
     } else if (measurement.enabled) {
-      setMeasurement((current) => ({ ...current, enabled: false }));
+      setMeasurement((current) => ({
+        ...current,
+        enabled: false,
+      }));
     } else if (state.status !== "home") {
       closeDrawing();
     } else if (Capacitor.isNativePlatform()) {
       void incomingDrawingPlugin.exitApp().catch(() => undefined);
     }
   }, [closeDrawing, libraryOpen, state.status, measurement.enabled]);
+
   useBackNavigation(handleBack);
 
   useEffect(() => {
     let disposed = false;
     let backListener: PluginListenerHandle | null = null;
+
     if (Capacitor.isNativePlatform()) {
-      void incomingDrawingPlugin.addListener("backPressed", dispatchBackNavigation)
+      void incomingDrawingPlugin
+        .addListener("backPressed", dispatchBackNavigation)
         .then((listener) => {
-          if (disposed) void listener.remove();
-          else backListener = listener;
-        }).catch(() => undefined);
+          if (disposed) {
+            void listener.remove();
+          } else {
+            backListener = listener;
+          }
+        })
+        .catch(() => undefined);
     }
+
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape" && !event.defaultPrevented) {
         event.preventDefault();
         dispatchBackNavigation();
       }
     };
+
     window.addEventListener("keydown", onKeyDown);
+
     return () => {
       disposed = true;
       void backListener?.remove();
       window.removeEventListener("keydown", onKeyDown);
+
       requestIdRef.current += 1;
       incomingRequestIdRef.current += 1;
+
       conversionAbortRef.current?.abort();
       incomingAbortRef.current?.abort();
     };
@@ -391,72 +489,150 @@ export function App() {
     viewerRef.current?.execute(command);
   }, []);
 
-  const handleMeasurementReady = useCallback((geometry: MeasurementGeometry) => {
-    setMeasurementGeometry(geometry);
-    setSourceUnit(geometry.units);
-    setDisplayUnit(geometry.units);
-  }, []);
-  const handleMeasurementPick = useCallback((pick: MeasurementPick) => {
-    setMeasurement((current) => {
-      if (!current.enabled) return current;
-      if (current.mode === "object") return { ...current, entity: pick.entity, points: [] };
-      const limit = current.mode === "distance" ? 2 : current.mode === "angle" ? 3 : 256;
-      const points = current.points.length >= limit && limit <= 3 ? [] : current.points;
-      if (points.length >= limit) return current;
-      return { ...current, points: [...points, pick.point], entity: null };
-    });
-    setMeasurementFeedback(pick.entity ? null : measurement.mode === "object" ? t("measureNoObject") : pick.snapped ? t(({ endpoint: "measureEndpoint", midpoint: "measureMidpoint", center: "measureCenter" } as const)[pick.snapped]) : null);
-  }, [measurement.mode, t]);
+  const handleMeasurementReady = useCallback(
+    (geometry: MeasurementGeometry) => {
+      setMeasurementGeometry(geometry);
+      setSourceUnit(geometry.units);
+      setDisplayUnit(geometry.units);
+    },
+    [],
+  );
+
+  const handleMeasurementPick = useCallback(
+    (pick: MeasurementPick) => {
+      setMeasurement((current) => {
+        if (!current.enabled) return current;
+
+        if (current.mode === "object") {
+          return {
+            ...current,
+            entity: pick.entity,
+            points: [],
+          };
+        }
+
+        const limit =
+          current.mode === "distance"
+            ? 2
+            : current.mode === "angle"
+              ? 3
+              : 256;
+
+        const points =
+          current.points.length >= limit && limit <= 3
+            ? []
+            : current.points;
+
+        if (points.length >= limit) return current;
+
+        return {
+          ...current,
+          points: [...points, pick.point],
+          entity: null,
+        };
+      });
+
+      setMeasurementFeedback(
+        pick.entity
+          ? null
+          : measurement.mode === "object"
+            ? t("measureNoObject")
+            : pick.snapped
+              ? t(
+                  (
+                    {
+                      endpoint: "measureEndpoint",
+                      midpoint: "measureMidpoint",
+                      center: "measureCenter",
+                    } as const
+                  )[pick.snapped],
+                )
+              : null,
+      );
+    },
+    [measurement.mode, t],
+  );
 
   const canvasRequestId = requestIdRef.current;
+
   const canvas =
     (state.status === "loading" && state.renderFile) ||
     state.status === "viewer" ? (
       <Suspense fallback={null}>
-        {state.drawing.format === "pdf" ? <PdfViewer
-          ref={viewerRef}
-          key={requestIdRef.current}
-          file={state.renderFile!}
-          onProgress={(phase, processed, total) => { if (canvasRequestId === requestIdRef.current) handleProgress(phase, processed, total); }}
-          onReady={() => { if (canvasRequestId === requestIdRef.current) handleViewerReady(); }}
-          onError={(error) => { if (canvasRequestId === requestIdRef.current) handleViewerError(error); }}
-        /> : <DrawingCanvas
-          ref={viewerRef}
-          key={requestIdRef.current}
-          file={
-            state.status === "viewer" ? state.renderFile : state.renderFile!
-          }
-          onProgress={(phase, processed, total) => {
-            if (canvasRequestId === requestIdRef.current) handleProgress(phase, processed, total);
-          }}
-          onReady={() => {
-            if (canvasRequestId === requestIdRef.current) handleViewerReady();
-          }}
-          onError={(error) => {
-            if (canvasRequestId === requestIdRef.current) handleViewerError(error);
-          }}
-          measurement={measurement}
-          onMeasurementReady={handleMeasurementReady}
-          onMeasurementPick={handleMeasurementPick}
-        />}
+        {state.drawing.format === "pdf" ? (
+          <PdfViewer
+            ref={viewerRef}
+            key={requestIdRef.current}
+            file={state.renderFile!}
+            onProgress={(phase, processed, total) => {
+              if (canvasRequestId === requestIdRef.current) {
+                handleProgress(phase, processed, total);
+              }
+            }}
+            onReady={() => {
+              if (canvasRequestId === requestIdRef.current) {
+                handleViewerReady();
+              }
+            }}
+            onError={(error) => {
+              if (canvasRequestId === requestIdRef.current) {
+                handleViewerError(error);
+              }
+            }}
+          />
+        ) : (
+          <DrawingCanvas
+            ref={viewerRef}
+            key={requestIdRef.current}
+            file={state.renderFile!}
+            onProgress={(phase, processed, total) => {
+              if (canvasRequestId === requestIdRef.current) {
+                handleProgress(phase, processed, total);
+              }
+            }}
+            onReady={() => {
+              if (canvasRequestId === requestIdRef.current) {
+                handleViewerReady();
+              }
+            }}
+            onError={(error) => {
+              if (canvasRequestId === requestIdRef.current) {
+                handleViewerError(error);
+              }
+            }}
+            measurement={measurement}
+            onMeasurementReady={handleMeasurementReady}
+            onMeasurementPick={handleMeasurementPick}
+          />
+        )}
       </Suspense>
     ) : null;
 
   let content;
+
   if (state.status === "error") {
     content = (
       <>
         <header className="topbar minimal">
-          <div className="wordmark">izCAD</div>
+          <div className="wordmark">
+            SKILL BHARAT <span>CAD PRO</span>
+          </div>
           <LanguageSwitch />
         </header>
+
         <ErrorScreen
           error={state.error}
           onOpenLibrary={() => setLibraryOpen(true)}
-          onRetry={lastDrawingRef.current ? () => {
-            const last = lastDrawingRef.current;
-            if (last) void openFile(last.file, last.libraryEntryId);
-          } : undefined}
+          onRetry={
+            lastDrawingRef.current
+              ? () => {
+                  const last = lastDrawingRef.current;
+                  if (last) {
+                    void openFile(last.file, last.libraryEntryId);
+                  }
+                }
+              : undefined
+          }
           onClose={closeDrawing}
         />
       </>
@@ -466,7 +642,7 @@ export function App() {
       <>
         <header className="topbar">
           <div className="wordmark">
-            iz<span>CAD</span>
+            SKILL BHARAT <span>CAD PRO</span>
           </div>
           <LanguageSwitch />
         </header>
@@ -478,6 +654,7 @@ export function App() {
               <span />
               <span />
             </div>
+
             <div className="cad-card card-front">
               <svg viewBox="0 0 220 160">
                 <path d="M26 124V42h56l25 22h87v60H26Z" />
@@ -490,9 +667,10 @@ export function App() {
           </div>
 
           <section className="hero-copy">
-            <p className="eyebrow">ANDROID CAD VIEWER</p>
+            <p className="eyebrow">PROFESSIONAL CAD VIEWER</p>
             <h1>{t("tagline")}</h1>
             <p className="lead">{t("description")}</p>
+
             <button
               type="button"
               className="open-button"
@@ -507,13 +685,19 @@ export function App() {
                 <span className="feature-dot" />
                 <strong>{t("supportedFormats")}</strong>
               </div>
+
               <div>
                 <ShieldIcon />
                 <strong>{t("offline")}</strong>
               </div>
             </div>
+
             <p className="privacy-copy">{t("privateFiles")}</p>
-            <nav className="legal-links" aria-label={t("privacyAndLicenses")}>
+
+            <nav
+              className="legal-links"
+              aria-label={t("privacyAndLicenses")}
+            >
               <a
                 href="https://sites.google.com/view/izcad-gp-pp/ana-sayfa"
                 target="_blank"
@@ -522,7 +706,9 @@ export function App() {
               >
                 {t("privacyAndLicenses")}
               </a>
+
               <span aria-hidden="true">•</span>
+
               <a
                 href="https://github.com/orgofjs/izCAD"
                 target="_blank"
@@ -532,77 +718,131 @@ export function App() {
                 {t("sourceCode")}
               </a>
             </nav>
-            <p className="version-copy">{t("appVersion")} {version.replace(/\.0$/, "")}</p>
+
+            <p className="version-copy">
+              {t("appVersion")} {version.replace(/\.0$/, "")}
+            </p>
           </section>
         </main>
       </>
     );
   } else if (state.status === "loading") {
     content = (
-        <LoadingScreen
-          phase={state.phase}
-          progress={state.progress}
-          fileName={state.drawing.name}
-          onCancel={closeDrawing}
-        />
+      <LoadingScreen
+        phase={state.phase}
+        progress={state.progress}
+        fileName={state.drawing.name}
+        onCancel={closeDrawing}
+      />
     );
   } else {
     content = (
-    <>
-      <header className="viewer-header">
-        <div className="file-heading">
-          <span className="file-format">{state.drawing.format}</span>
-          <div>
-            <strong>{state.drawing.name}</strong>
-            <span>
-              {t("fileSize")}: {formatBytes(state.drawing.size, locale)}
-            </span>
-          </div>
-        </div>
-        <div className="viewer-header-actions">
-          <button
-            type="button"
-            className="open-button compact"
-            aria-label={t("myDrawings")}
-            title={t("myDrawings")}
-            onClick={() => setLibraryOpen(true)}
-          >
-            <FolderIcon />
-            <span>{t("myDrawings")}</span>
-          </button>
-          <button
-            type="button"
-            className="icon-button"
-            aria-label={t("close")}
-            title={t("close")}
-            onClick={closeDrawing}
-          >
-            <CloseIcon />
-          </button>
-        </div>
-      </header>
+      <>
+        <header className="viewer-header">
+          <div className="file-heading">
+            <span className="file-format">{state.drawing.format}</span>
 
-      <ViewerToolbar onCommand={sendCommand}
-        canMeasure={state.drawing.format !== "pdf"}
-        measuring={measurement.enabled}
-        onMeasure={() => setMeasurement((current) => ({ ...current, enabled: !current.enabled }))} />
-      {measurement.enabled && state.drawing.format !== "pdf" ? <MeasurementPanel settings={measurement} geometry={measurementGeometry}
-        sourceUnit={sourceUnit} displayUnit={displayUnit} feedback={measurementFeedback}
-        onSettings={(settings) => { setMeasurement(settings); setMeasurementFeedback(null); }}
-        onSourceUnit={(unit) => { setSourceUnit(unit); setDisplayUnit(unit); }} onDisplayUnit={setDisplayUnit} /> : null}
-      {libraryNotice ? <div className="library-notice" role="status">{t("librarySaveFailed")}</div> : null}
-    </>
+            <div>
+              <strong>{state.drawing.name}</strong>
+              <span>
+                {t("fileSize")}: {formatBytes(state.drawing.size, locale)}
+              </span>
+            </div>
+          </div>
+
+          <div className="viewer-header-actions">
+            <button
+              type="button"
+              className="open-button compact"
+              aria-label={t("myDrawings")}
+              title={t("myDrawings")}
+              onClick={() => setLibraryOpen(true)}
+            >
+              <FolderIcon />
+              <span>{t("myDrawings")}</span>
+            </button>
+
+            <button
+              type="button"
+              className="icon-button"
+              aria-label={t("close")}
+              title={t("close")}
+              onClick={closeDrawing}
+            >
+              <CloseIcon />
+            </button>
+          </div>
+        </header>
+
+        <ViewerToolbar
+          onCommand={sendCommand}
+          canMeasure={state.drawing.format !== "pdf"}
+          measuring={measurement.enabled}
+          onMeasure={() =>
+            setMeasurement((current) => ({
+              ...current,
+              enabled: !current.enabled,
+            }))
+          }
+        />
+
+        {measurement.enabled && state.drawing.format !== "pdf" ? (
+          <MeasurementPanel
+            settings={measurement}
+            geometry={measurementGeometry}
+            sourceUnit={sourceUnit}
+            displayUnit={displayUnit}
+            feedback={measurementFeedback}
+            onSettings={(settings) => {
+              setMeasurement(settings);
+              setMeasurementFeedback(null);
+            }}
+            onSourceUnit={(unit) => {
+              setSourceUnit(unit);
+              setDisplayUnit(unit);
+            }}
+            onDisplayUnit={setDisplayUnit}
+          />
+        ) : null}
+
+        {libraryNotice ? (
+          <div className="library-notice" role="status">
+            {t("librarySaveFailed")}
+          </div>
+        ) : null}
+      </>
     );
   }
 
   return (
-    <div className={`app-shell ${state.status === "home" ? "home" : "viewer-shell"}`}>
-      <div className="canvas-layer" inert={libraryOpen} aria-hidden={libraryOpen}>{canvas}</div>
-      <div className="app-content" hidden={libraryOpen}>{content}</div>
+    <div
+      className={`app-shell ${
+        state.status === "home" ? "home" : "viewer-shell"
+      }`}
+    >
+      <div
+        className="canvas-layer"
+        inert={libraryOpen}
+        aria-hidden={libraryOpen}
+      >
+        {canvas}
+      </div>
+
+      <div className="app-content" hidden={libraryOpen}>
+        {content}
+      </div>
+
       {libraryOpen ? (
         <div className="library-overlay">
-          <DrawingLibrary onClose={() => { setLibraryOpen(false); setIncomingArchive(null); }} onOpen={openFile}
-            incomingArchive={incomingArchive} onIncomingArchiveHandled={() => setIncomingArchive(null)} />
+          <DrawingLibrary
+            onClose={() => {
+              setLibraryOpen(false);
+              setIncomingArchive(null);
+            }}
+            onOpen={openFile}
+            incomingArchive={incomingArchive}
+            onIncomingArchiveHandled={() => setIncomingArchive(null)}
+          />
         </div>
       ) : null}
     </div>
