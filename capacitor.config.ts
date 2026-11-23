@@ -1,13 +1,12 @@
+
 import type { CapacitorConfig } from "@capacitor/cli";
 
 const config: CapacitorConfig = {
-  appId: "com.izcad.viewer",
-  appName: "izCAD",
+  appId: "com.skillbharat.cadpro",
+  appName: "SKILL BHARAT CAD PRO",
   webDir: "dist",
   plugins: {
     SystemBars: {
-      // Capacitor's DARK style means light foreground icons on a dark app.
-      // Keep this explicit: DEFAULT follows the phone theme, not the web UI.
       style: "DARK",
       hidden: false,
       insetsHandling: "css",
